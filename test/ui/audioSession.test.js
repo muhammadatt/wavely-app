@@ -4,45 +4,34 @@ import { readFileSync } from 'node:fs'
 
 import {
   setPlaybackAudioSession,
+  createAudioContext,
   needsResume,
-  keepContextRunning,
-  RESUME_GESTURES,
+  resumeIfStopped,
+  onContextStopped,
 } from '../../src/platform/audioSession.js'
+import { startPlayback, stopPlayback } from '../../src/audio/playback.js'
 
-/** A document stand-in that records listeners and can fire them. */
-function fakeDocument() {
-  const listeners = new Map()
-  return {
-    visibilityState: 'visible',
-    addEventListener(type, fn) {
-      if (!listeners.has(type)) listeners.set(type, new Set())
-      listeners.get(type).add(fn)
-    },
-    removeEventListener(type, fn) {
-      listeners.get(type)?.delete(fn)
-    },
-    fire(type) {
-      for (const fn of listeners.get(type) ?? []) fn()
-    },
-    count() {
-      let n = 0
-      for (const set of listeners.values()) n += set.size
-      return n
-    },
-  }
-}
-
-/** A context stand-in whose resume() is counted and can be refused. */
-function fakeContext(state, { refuse = false } = {}) {
+/** A context stand-in: counts resume() calls, can refuse or throw, fires statechange. */
+function fakeContext(state, { refuse = false, throwSync = false } = {}) {
+  const listeners = new Set()
   const ctx = {
     state,
     resumes: 0,
     resume() {
       ctx.resumes++
+      if (throwSync) throw new Error('InvalidStateError')
       if (refuse) return Promise.reject(new Error('NotAllowedError'))
       ctx.state = 'running'
       return Promise.resolve()
     },
+    addEventListener(type, fn) { if (type === 'statechange') listeners.add(fn) },
+    removeEventListener(type, fn) { if (type === 'statechange') listeners.delete(fn) },
+    /** Move to `next` and fire statechange, as the browser would. */
+    become(next) {
+      ctx.state = next
+      for (const fn of listeners) fn()
+    },
+    listenerCount: () => listeners.size,
   }
   return ctx
 }
@@ -68,6 +57,13 @@ test('a session that refuses the type reports false instead of throwing', () => 
   assert.equal(setPlaybackAudioSession(nav), false)
 })
 
+test('creates a context from the prefixed constructor where only that exists', () => {
+  class Webkit { constructor() { this.kind = 'webkit' } }
+  class Standard { constructor() { this.kind = 'standard' } }
+  assert.equal(createAudioContext({ webkitAudioContext: Webkit }).kind, 'webkit')
+  assert.equal(createAudioContext({ AudioContext: Standard, webkitAudioContext: Webkit }).kind, 'standard')
+})
+
 test('suspended and interrupted contexts need a resume; running and closed do not', () => {
   assert.equal(needsResume({ state: 'suspended' }), true)
   assert.equal(needsResume({ state: 'interrupted' }), true)
@@ -76,60 +72,94 @@ test('suspended and interrupted contexts need a resume; running and closed do no
   assert.equal(needsResume(null), false)
 })
 
-test('an interrupted context resumes on the next user gesture', () => {
-  const doc = fakeDocument()
-  const ctx = fakeContext('interrupted')
-  keepContextRunning(ctx, doc)
-  doc.fire('touchend')
-  assert.equal(ctx.resumes, 1)
-  assert.equal(ctx.state, 'running')
-  // Running now: further gestures leave it alone.
-  doc.fire('click')
-  assert.equal(ctx.resumes, 1)
+test('resumeIfStopped resumes a stopped context and leaves a running one alone', async () => {
+  const stopped = fakeContext('interrupted')
+  assert.equal(await resumeIfStopped(stopped), true)
+  assert.equal(stopped.resumes, 1)
+
+  const running = fakeContext('running')
+  assert.equal(await resumeIfStopped(running), true)
+  assert.equal(running.resumes, 0)
+
+  assert.equal(await resumeIfStopped(fakeContext('closed')), false)
+  assert.equal(await resumeIfStopped(null), false)
 })
 
-test('listens for every gesture iOS accepts, plus visibility', () => {
-  const doc = fakeDocument()
-  keepContextRunning(fakeContext('running'), doc)
-  assert.equal(doc.count(), RESUME_GESTURES.length + 1)
-  for (const type of ['touchend', 'click', 'keydown']) assert.ok(RESUME_GESTURES.includes(type))
+test('resumeIfStopped never rejects or throws: a refusal resolves false', async () => {
+  assert.equal(await resumeIfStopped(fakeContext('interrupted', { refuse: true })), false)
+  assert.equal(await resumeIfStopped(fakeContext('suspended', { throwSync: true })), false)
 })
 
-test('a refused resume is swallowed and the next gesture tries again', async () => {
-  const doc = fakeDocument()
-  const ctx = fakeContext('interrupted', { refuse: true })
-  keepContextRunning(ctx, doc)
-  doc.fire('click')
-  doc.fire('keydown')
-  await new Promise(r => setImmediate(r)) // let the rejections settle unhandled-free
-  assert.equal(ctx.resumes, 2)
-})
-
-test('returning to the page tries to resume; hiding it does not', () => {
-  const doc = fakeDocument()
-  const ctx = fakeContext('suspended')
-  keepContextRunning(ctx, doc)
-  doc.visibilityState = 'hidden'
-  doc.fire('visibilitychange')
-  assert.equal(ctx.resumes, 0)
-  doc.visibilityState = 'visible'
-  doc.fire('visibilitychange')
-  assert.equal(ctx.resumes, 1)
-})
-
-test('the returned cleanup removes every listener', () => {
-  const doc = fakeDocument()
-  const stop = keepContextRunning(fakeContext('running'), doc)
+test('a context that stops under the user reports it; one that starts does not', () => {
+  const ctx = fakeContext('running')
+  let stops = 0
+  const stop = onContextStopped(ctx, () => stops++)
+  ctx.become('interrupted')
+  assert.equal(stops, 1)
+  ctx.become('running')
+  assert.equal(stops, 1)
+  ctx.become('suspended')
+  assert.equal(stops, 2)
+  ctx.become('closed')
+  assert.equal(stops, 2)
   stop()
-  assert.equal(doc.count(), 0)
+  assert.equal(ctx.listenerCount(), 0)
 })
 
-test('the editor sets the session before creating its AudioContext', () => {
+test('nothing resumes the context on its own: only a call to resumeIfStopped does', () => {
+  const ctx = fakeContext('running')
+  onContextStopped(ctx, () => {})
+  ctx.become('interrupted')
+  assert.equal(ctx.resumes, 0)
+})
+
+// ── Where the session is claimed ─────────────────────────────────────────────
+
+/** Just enough AudioContext for startPlayback to schedule one node. */
+function playbackContext() {
+  return {
+    currentTime: 0,
+    sampleRate: 48000,
+    destination: {},
+    createBufferSource: () => ({ connect() {}, disconnect() {}, start() {}, stop() {}, onended: null }),
+  }
+}
+
+/** Run `fn` with a fake navigator.audioSession, restoring the real one after. */
+function withAudioSession(fn) {
+  const desc = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  const session = { type: 'auto' }
+  Object.defineProperty(globalThis, 'navigator', { value: { audioSession: session }, configurable: true, writable: true })
+  const raf = globalThis.requestAnimationFrame
+  globalThis.requestAnimationFrame ??= () => 0
+  globalThis.cancelAnimationFrame ??= () => {}
+  try {
+    fn(session)
+  } finally {
+    stopPlayback()
+    if (desc) Object.defineProperty(globalThis, 'navigator', desc)
+    else delete globalThis.navigator
+    if (!raf) delete globalThis.requestAnimationFrame
+  }
+}
+
+test('starting playback claims the playback audio session', () => {
+  withAudioSession((session) => {
+    const segments = [{
+      id: 's', outputStart: 0, sourceStart: 0, sourceEnd: 1,
+      sourceBuffer: { duration: 1, numberOfChannels: 1, sampleRate: 48000 }, sourceBufferId: 'b',
+    }]
+    startPlayback(segments, 0, playbackContext(), () => {}, () => {})
+    assert.equal(session.type, 'playback')
+  })
+})
+
+test('creating the editor context does not claim the session (imports must not stop other audio)', () => {
   const src = readFileSync(new URL('../../src/composables/useEditorState.js', import.meta.url), 'utf8')
-  const session = src.indexOf('setPlaybackAudioSession()')
-  const create = src.indexOf('new (window.AudioContext')
-  assert.ok(session > 0 && create > 0 && session < create)
-  assert.ok(src.includes('keepContextRunning(audioContext)'))
+  const body = src.slice(src.indexOf('function getAudioContext()'), src.indexOf('// ── Undo/Redo'))
+  assert.ok(body.length > 0)
+  assert.doesNotMatch(body, /setPlaybackAudioSession\(/)
+  assert.match(body, /onContextStopped\(audioContext/)
 })
 
 test('the web app manifest is linked and its icons exist', () => {

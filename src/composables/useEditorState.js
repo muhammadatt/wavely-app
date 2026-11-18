@@ -15,7 +15,7 @@ import {
 } from '../audio/operations.js'
 import { stopPlayback } from '../audio/playback.js'
 import { getDefaultOutputProfile, isOutputProfileLocked } from '../audio/presets.js'
-import { setPlaybackAudioSession, keepContextRunning, needsResume } from '../platform/audioSession.js'
+import { createAudioContext, onContextStopped, resumeIfStopped } from '../platform/audioSession.js'
 
 const UNDO_STACK_CAP = 50
 
@@ -290,15 +290,19 @@ export function useEditorState() {
   // AudioContext management
   function getAudioContext() {
     if (!audioContext) {
-      // Before the context exists, so iOS plays with the silent switch on.
-      setPlaybackAudioSession()
-      audioContext = new (window.AudioContext || window.webkitAudioContext)()
-      keepContextRunning(audioContext)
+      // The playback audio session is NOT claimed here: this context also
+      // decodes imports, and claiming it would pause the user's music the moment
+      // a file is opened. startPlayback() claims it when sound starts.
+      audioContext = createAudioContext()
+      // A call or another app stopped the audio: stop the transport to match,
+      // so the next Play (a click, which iOS needs) resumes it cleanly.
+      onContextStopped(audioContext, () => {
+        stopPlayback()
+        for (const doc of appState.documents) doc.isPlaying = false
+      })
     }
     // 'interrupted' too (Safari, after a call or another app took the audio).
-    if (needsResume(audioContext)) {
-      audioContext.resume()?.catch?.(() => {})
-    }
+    resumeIfStopped(audioContext)
     return audioContext
   }
 
