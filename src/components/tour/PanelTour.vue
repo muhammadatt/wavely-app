@@ -44,7 +44,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { hitBoxes, placeBadges, stackOrder, stepIndex } from './tourGeometry.js'
 
 const props = defineProps({
-  /** { src, w, h } — the panel screenshot and its CSS size. */
+  /** { src, w, h, radius? } — the screenshot, its CSS size and, for a whole
+   *  window, the window's corner radius (`radius`, recorded by help:shots). */
   image: { type: Object, required: true },
   /** [{ id, label, text, at: { x, y, w, h } }], in the order to number them. */
   spots: { type: Array, required: true },
@@ -123,6 +124,20 @@ function badgeStyle(i) {
 }
 
 const pct = (v, of) => `${(v / of) * 100}%`
+
+/**
+ * The picture's corners. A whole-window shot is a rectangle around a rounded
+ * window, and its corners hold what sat behind it in the editor (the cyan
+ * waveform), so it is rounded by the window's own radius — in percent, so it
+ * scales with the picture. The stage's fixed 14 px left a sliver showing once
+ * the help tour moved to the whole window (November 2026). A faceplate crop
+ * has square corners and keeps the 14 px.
+ */
+const stageStyle = computed(() => {
+  const { radius, w, h } = props.image
+  if (!radius) return null
+  return { borderRadius: `${pct(radius, w)} / ${pct(radius, h)}` }
+})
 function hitStyle(i) {
   const b = hits.value[i]
   const { w, h } = props.image
@@ -162,7 +177,7 @@ defineExpose({ focusSpot })
 <template>
   <div class="pt" :class="{ 'pt--solo': !list }">
     <figure class="pt-figure">
-      <div ref="stage" class="pt-stage">
+      <div ref="stage" class="pt-stage" :style="stageStyle">
         <img
           :src="image.src" :width="image.w" :height="image.h" :alt="alt"
           class="pt-img" draggable="false" :loading="eager ? 'eager' : 'lazy'"

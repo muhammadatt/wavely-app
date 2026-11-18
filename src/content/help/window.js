@@ -13,7 +13,8 @@
  * wins over the generic text here.
  *
  * Header controls are listed FIRST on the page and footer controls LAST, each in
- * the window's own left-to-right order (DELTA, presets, ON / BYPASS; Preview,
+ * the window's own left-to-right order (the preset browser centred, then DELTA
+ * beside ON / BYPASS on the right — develop's header, November 2026; Preview,
  * Apply), so the tour's numbers read across the header, down the faceplate and
  * across the footer.
  */
@@ -28,6 +29,14 @@ export const PANEL_GROUP = 'Panel'
 
 export const WINDOW_HEADER = [
   {
+    label: 'Presets',
+    shot: 'presets',
+    text: 'Loads factory presets and ones you have saved, and saves the current settings under a name.',
+    details: [
+      'The arrows step through the list. Values the effect measures from your file are never stored in a preset; they are measured again on the next file.',
+    ],
+  },
+  {
     label: 'DELTA',
     shot: 'delta',
     text: 'Plays only what the effect is changing: the difference between the processed and the original sound.',
@@ -36,14 +45,6 @@ export const WINDOW_HEADER = [
     ],
     range: 'On, Off',
     default: 'Off',
-  },
-  {
-    label: 'Presets',
-    shot: 'presets',
-    text: 'Loads factory presets and ones you have saved, and saves the current settings under a name.',
-    details: [
-      'The arrows step through the list. Values the effect measures from your file are never stored in a preset; they are measured again on the next file.',
-    ],
   },
   {
     label: 'ON / BYPASS',

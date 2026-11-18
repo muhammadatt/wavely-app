@@ -386,7 +386,7 @@ async function applyAndClose() {
     @apply="applyAndClose"
     @close="close"
   >
-    <template #header-center>
+    <template #header-controls>
       <button
         type="button" class="vp-surface" data-help="surface" :aria-pressed="String(light)"
         :title="light ? 'Dark faceplate' : 'Light faceplate'" :aria-label="light ? 'Switch to the dark faceplate' : 'Switch to the light faceplate'"

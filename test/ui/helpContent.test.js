@@ -343,7 +343,7 @@ test('the window\'s own controls frame each page: header first, page in between,
     { label: 'DELTA', shot: 'delta', text: 'The page\'s own DELTA.' },
   ]
   const out = withWindowControls(own, shots)
-  assert.deepEqual(out.map(c => c.shot), ['delta', 'bypass', 'amount', 'apply'])
+  assert.deepEqual(out.map(c => c.shot), ['delta', 'bypass', 'amount', 'apply'])  // presets, when shown, comes first
   // The page's own text wins, moved into the header group.
   assert.equal(out[0].text, 'The page\'s own DELTA.')
   assert.equal(out[0].group, WINDOW_HEADER_GROUP)

@@ -58,7 +58,7 @@ function togglePeakHold() {
     :show-engage="false"
     @close="close"
   >
-    <template #header-center>
+    <template #header-controls>
       <!-- Freeze and peak hold belong in the header rather than with the
            settings below: they are what you reach for while looking at the
            plot, usually the instant something interesting goes past. -->
