@@ -2,29 +2,30 @@
   "panel": {
     "src": "/help/shots/cambridge-inflator/panel.jpg",
     "w": 660,
-    "h": 525
+    "h": 525,
+    "radius": 22
   },
   "controls": {
     "in": {
       "src": "/help/shots/cambridge-inflator/in.png",
-      "w": 83,
+      "w": 68,
       "h": 367,
       "at": {
-        "x": 18,
+        "x": 24,
         "y": 84,
-        "w": 71,
+        "w": 56,
         "h": 355
       }
     },
     "effect": {
       "src": "/help/shots/cambridge-inflator/effect.png",
       "w": 76,
-      "h": 310,
+      "h": 304,
       "at": {
         "x": 104,
         "y": 104,
         "w": 64,
-        "h": 298
+        "h": 292
       }
     },
     "lift": {
@@ -63,23 +64,67 @@
     "curve": {
       "src": "/help/shots/cambridge-inflator/curve.png",
       "w": 76,
-      "h": 310,
+      "h": 304,
       "at": {
         "x": 492,
         "y": 104,
         "w": 64,
-        "h": 298
+        "h": 292
       }
     },
     "out": {
       "src": "/help/shots/cambridge-inflator/out.png",
-      "w": 83,
+      "w": 68,
       "h": 367,
       "at": {
-        "x": 571,
+        "x": 581,
         "y": 84,
-        "w": 71,
+        "w": 56,
         "h": 355
+      }
+    },
+    "presets": {
+      "src": "/help/shots/cambridge-inflator/presets.png",
+      "w": 140,
+      "h": 42,
+      "at": {
+        "x": 266,
+        "y": 15,
+        "w": 128,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/cambridge-inflator/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 526,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/cambridge-inflator/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 410,
+        "y": 480,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/cambridge-inflator/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 490,
+        "y": 480,
+        "w": 154,
+        "h": 32
       }
     }
   },

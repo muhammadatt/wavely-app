@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/voxpressor/panel.jpg",
     "w": 800,
-    "h": 595
+    "h": 595,
+    "radius": 22
   },
   "controls": {
     "surface": {
@@ -10,7 +11,7 @@
       "w": 42,
       "h": 42,
       "at": {
-        "x": 386,
+        "x": 589,
         "y": 15,
         "w": 30,
         "h": 30
@@ -18,23 +19,23 @@
     },
     "peak-reduction": {
       "src": "/help/shots/voxpressor/peak-reduction.png",
-      "w": 196,
+      "w": 188,
       "h": 259,
       "at": {
-        "x": 23,
+        "x": 31,
         "y": 82,
-        "w": 184,
+        "w": 176,
         "h": 247
       }
     },
     "attack-release": {
       "src": "/help/shots/voxpressor/attack-release.png",
-      "w": 196,
+      "w": 188,
       "h": 52,
       "at": {
-        "x": 23,
+        "x": 31,
         "y": 230,
-        "w": 184,
+        "w": 176,
         "h": 40
       }
     },
@@ -52,12 +53,12 @@
     "meter": {
       "src": "/help/shots/voxpressor/meter.png",
       "w": 327,
-      "h": 175,
+      "h": 155,
       "at": {
         "x": 243,
         "y": 88,
         "w": 315,
-        "h": 163
+        "h": 143
       }
     },
     "meter-select": {
@@ -74,78 +75,78 @@
     "readout": {
       "src": "/help/shots/voxpressor/readout.png",
       "w": 206,
-      "h": 38,
+      "h": 24,
       "at": {
         "x": 303,
         "y": 297,
         "w": 194,
-        "h": 26
+        "h": 12
       }
     },
     "body-leveler": {
       "src": "/help/shots/voxpressor/body-leveler.png",
-      "w": 182,
+      "w": 116,
       "h": 140,
       "at": {
-        "x": 604,
+        "x": 637,
         "y": 82,
-        "w": 170,
+        "w": 104,
         "h": 128
       }
     },
     "enhance-detail": {
       "src": "/help/shots/voxpressor/enhance-detail.png",
-      "w": 182,
+      "w": 152,
       "h": 134,
       "at": {
-        "x": 604,
+        "x": 619,
         "y": 244,
-        "w": 170,
+        "w": 140,
         "h": 122
       }
     },
     "de-ess-amount": {
       "src": "/help/shots/voxpressor/de-ess-amount.png",
       "w": 102,
-      "h": 112,
+      "h": 109,
       "at": {
         "x": 21,
-        "y": 367,
+        "y": 370,
         "w": 90,
-        "h": 100
+        "h": 97
       }
     },
     "de-ess-band": {
       "src": "/help/shots/voxpressor/de-ess-band.png",
-      "w": 97,
-      "h": 112,
+      "w": 96,
+      "h": 97,
       "at": {
-        "x": 113,
-        "y": 367,
-        "w": 85,
-        "h": 100
+        "x": 114,
+        "y": 382,
+        "w": 84,
+        "h": 85
       }
     },
     "density-drive": {
       "src": "/help/shots/voxpressor/density-drive.png",
       "w": 102,
-      "h": 112,
+      "h": 109,
       "at": {
         "x": 310,
-        "y": 367,
+        "y": 370,
         "w": 90,
-        "h": 100
+        "h": 97
       }
     },
     "density-mix": {
       "src": "/help/shots/voxpressor/density-mix.png",
       "w": 92,
-      "h": 112,
+      "h": 97,
       "at": {
         "x": 405,
-        "y": 367,
+        "y": 382,
         "w": 80,
-        "h": 100
+        "h": 85
       }
     },
     "density-comp": {
@@ -161,12 +162,12 @@
     },
     "output-level": {
       "src": "/help/shots/voxpressor/output-level.png",
-      "w": 208,
+      "w": 188,
       "h": 52,
       "at": {
-        "x": 578,
+        "x": 596,
         "y": 412,
-        "w": 196,
+        "w": 176,
         "h": 40
       }
     },
@@ -179,6 +180,39 @@
         "y": 464,
         "w": 196,
         "h": 45
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/voxpressor/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 666,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/voxpressor/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 550,
+        "y": 550,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/voxpressor/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 630,
+        "y": 550,
+        "w": 154,
+        "h": 32
       }
     }
   },

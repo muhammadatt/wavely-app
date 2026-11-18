@@ -37,15 +37,29 @@
  * `drums.wav` for the ones in DRUM_IDS (gitignored: the owner's clips, for
  * screenshots only, NEVER the marketing pages' Hear it audio) — and the
  * generated probe otherwise.
+ *
+ * ── RE-BOXING ───────────────────────────────────────────────────────────────
+ *   npm run help:shots -- --rebox opto-smooth
+ * Re-measures each control's box and re-cuts its crop from the panel.jpg
+ * already on disk, keeping panel.jpg and face.jpg. For a fix to how boxes are
+ * measured (`lib/controlBox.mjs`) without the owner's clips: a full run without
+ * them would replace the live pictures with probe-lit ones. The panel's layout
+ * must be the one the pictures show — it refuses when the window size differs.
  */
 import { chromium } from 'playwright'
 import { spawn } from 'node:child_process'
-import { writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, rmSync, readFileSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { HELP, HELP_META, helpSlug } from '../src/content/help/index.js'
+import { measureControlBox } from './lib/controlBox.mjs'
+import { WINDOW_HEADER, WINDOW_FOOTER } from '../src/content/help/window.js'
+
+/** The window's own controls (header and footer): shot wherever a window has them. */
+const WINDOW_CONTROLS = [...WINDOW_HEADER, ...WINDOW_FOOTER]
+const WINDOW_SHOTS = new Set(WINDOW_CONTROLS.map(c => c.shot))
 import { MARKETING } from '../src/content/marketing/index.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -53,7 +67,8 @@ const PORT = Number(process.env.HELP_SHOTS_PORT ?? 5198)
 const URL_ = process.env.HELP_SHOTS_URL ?? `http://localhost:${PORT}/`
 const PAD = 6
 
-const only = process.argv.slice(2)
+const REBOX = process.argv.includes('--rebox')
+const only = process.argv.slice(2).filter(a => !a.startsWith('--'))
 const ids = (only.length ? only : Object.keys(HELP))
 for (const id of ids) if (!HELP[id]) { console.error(`no help entry: ${id}`); process.exit(1) }
 
@@ -79,7 +94,7 @@ const SHOT_SETTINGS = {
   // A lower threshold, so the Resonance view shows the voice being treated.
   'resonance-suppressor': { focus: { global: { selectivity: 13 } } },
   // The default (12 kHz, −8 dB) barely touches this vocal's top end.
-  'hf-limiter': { freq: 5000, threshold: -14 },
+  'hf-limiter': { freq: 5000, threshold: -20 },
 }
 
 /** How long audio runs through an open window before it is shot. */
@@ -175,9 +190,152 @@ async function selectTab(name) {
  * (which reads Stop while it runs). An offline process has no preview and no
  * live meters, so it is shot idle.
  */
-async function setPlaying(frame, on) {
+async function setPlaying(id, frame, on) {
   const button = frame.getByRole('button', { name: on ? 'Preview' : 'Stop', exact: true }).first()
-  if (await button.count() && await button.isEnabled()) { await button.click(); await page.waitForTimeout(300) }
+  if (await button.count() && await button.isEnabled()) { await button.click(); await page.waitForTimeout(300); return }
+  // A window that only listens to the editor's own transport (the Spectrum
+  // Analyzer) is played with Space's event. Only those: the offline windows
+  // (Noise Reduction, Auto Leveler) and Peak Normalize have no Preview either,
+  // and are not meant to be shot with unprocessed audio playing.
+  if (!TRANSPORT_IDS.has(id)) return
+  // Its state is read off the time readout (advancing = playing), not assumed:
+  // a toggle after another window's Preview / Stop does not always start it.
+  for (let tries = 0; tries < 3 && (await transportPlaying()) !== on; tries++) {
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('wavely:toggle-play')))
+    await page.waitForTimeout(400)
+  }
+}
+/** Windows with no Preview of their own that show the editor's playback. */
+const TRANSPORT_IDS = new Set(['spectrum-analyzer'])
+async function transportPlaying() {
+  const clock = page.locator('button[aria-label="Loop playback"]')
+    .locator('xpath=ancestor::div[contains(@class,"grid-cols")][1]/div[1]')
+  const a = await clock.innerText().catch(() => '')
+  await page.waitForTimeout(250)
+  return a !== await clock.innerText().catch(() => '')
+}
+
+/**
+ * Windows whose display only reads well at a busy moment: a predicate on the
+ * open window, polled before each picture is taken so a live meter or curve is
+ * caught mid-action rather than in a pause between words.
+ */
+const BUSY = {
+  // The HF reduction readout (its first figure, dB): a deep cut bends the curve.
+  'hf-limiter': async frame => {
+    const t = await frame.locator('[data-help="meter"]').first().innerText().catch(() => '')
+    const m = t.match(/(\d+(?:\.\d+)?)\s*dB/)
+    return !!m && Number(m[1]) >= 8
+  },
+  // The display's peak readout ("1.2k Hz · D6 −29 · −49.5 dB"): voice, not a pause.
+  'spectrum-analyzer': async frame => {
+    const t = await frame.locator('[data-help="display"]').first().innerText().catch(() => '')
+    const m = t.replace(/\u2212/g, '-').match(/(-?\d+(?:\.\d+)?)\s*dB\s*$/m)
+    return !!m && Number(m[1]) >= -60
+  },
+}
+const BUSY_TIMEOUT_MS = 20000
+/** Waits for a busy moment; false when none came within the timeout. */
+async function waitBusy(id, frame) {
+  if (!BUSY[id]) return true
+  const until = Date.now() + BUSY_TIMEOUT_MS
+  while (Date.now() < until) {
+    if (await BUSY[id](frame)) return true
+    await page.waitForTimeout(20)
+  }
+  console.log(`warn  ${id}: never busy within ${BUSY_TIMEOUT_MS / 1000} s`)
+  return false
+}
+/**
+ * A screenshot taken at a busy moment, kept only if the window is STILL busy
+ * once it is taken: the HF Limiter's meter has no hold, and a cut read at the
+ * poll had often let go by the time the picture was captured. Retaken up to
+ * ten times, then kept as is.
+ */
+async function busyShot(id, frame, opts) {
+  for (let i = 0; i < 10; i++) {
+    // No busy moment in the whole wait (a quiet clip, the generated probe):
+    // take the picture once rather than wait again for every retry.
+    const busy = await waitBusy(id, frame)
+    await page.screenshot(opts)
+    if (!busy || !BUSY[id] || await BUSY[id](frame)) return
+  }
+  console.log(`warn  ${id}: ${opts.path.split(/[\\/]/).pop()} taken after the moment passed`)
+}
+
+/**
+ * The window's corner radius in CSS px (18, or 22 on a Modula panel). panel.jpg
+ * is a rectangle, so its corners hold whatever sat behind the window in the
+ * editor — the help page rounds the picture by this much to hide them.
+ */
+async function windowRadius(frame) {
+  return frame.evaluate(n => parseFloat(getComputedStyle(n).borderTopLeftRadius) || 0)
+}
+
+/**
+ * `--rebox`: measure every control's box on the open window and cut its crop
+ * from the panel.jpg on disk (2x), keeping the live pictures. Returns the
+ * updated manifest, or null when the window no longer matches the picture.
+ */
+async function rebox(id, frame) {
+  const file = join(ROOT, 'src/content/help/shots', `${id}.json`)
+  if (!existsSync(file)) { console.log(`FAIL  ${id}: --rebox needs an existing manifest`); return null }
+  const manifest = JSON.parse(readFileSync(file, 'utf8'))
+  const box = await frame.boundingBox()
+  if (Math.round(box.width) !== manifest.panel.w || Math.round(box.height) !== manifest.panel.h) {
+    console.log(`FAIL  ${id}: the window is ${Math.round(box.width)}×${Math.round(box.height)}, panel.jpg ${manifest.panel.w}×${manifest.panel.h} — re-shoot instead`)
+    return null
+  }
+  manifest.panel.radius = await windowRadius(frame)
+  const slug = helpSlug(id)
+  const outDir = join(ROOT, 'public/help/shots', slug)
+  // Written only once every control has passed, so a refusal leaves nothing half-done.
+  const writes = []
+  for (const c of [...HELP[id].controls, ...WINDOW_CONTROLS]) {
+    if (!c.shot) continue
+    const el = frame.locator(`[data-help="${c.shot}"]`).first()
+    const b = (await el.count()) ? await el.evaluate(measureControlBox) : null
+    if (!b) {
+      if (WINDOW_SHOTS.has(c.shot)) continue // this window has no such control
+      console.log(`FAIL  ${id}: ${c.shot} not found`); return null
+    }
+    const at = { x: Math.round(b.x - box.x), y: Math.round(b.y - box.y), w: Math.round(b.width), h: Math.round(b.height) }
+    const clip = {
+      x: Math.max(0, at.x - PAD), y: Math.max(0, at.y - PAD),
+      w: Math.min(manifest.panel.w, at.x + at.w + PAD) - Math.max(0, at.x - PAD),
+      h: Math.min(manifest.panel.h, at.y + at.h + PAD) - Math.max(0, at.y - PAD),
+    }
+    // Cut from the picture on disk, at its own (2x) resolution, in the page.
+    const png = await page.evaluate(async ([src, c, cssW]) => {
+      const img = new Image(); img.src = src; await img.decode()
+      const k = img.naturalWidth / cssW
+      const cv = document.createElement('canvas')
+      cv.width = Math.round(c.w * k); cv.height = Math.round(c.h * k)
+      cv.getContext('2d').drawImage(img, c.x * k, c.y * k, c.w * k, c.h * k, 0, 0, cv.width, cv.height)
+      return cv.toDataURL('image/png').split(',')[1]
+    }, [`${manifest.panel.src}?rebox=${Date.now()}`, clip, manifest.panel.w])
+    writes.push([join(outDir, `${c.shot}.png`), Buffer.from(png, 'base64')])
+    const old = manifest.controls[c.shot]?.at
+    // Re-measuring only ever trims a box: one that reaches past its old box
+    // means the panel moved since the pictures were taken.
+    const SLACK = 2
+    if (old && (at.x < old.x - SLACK || at.y < old.y - SLACK || at.x + at.w > old.x + old.w + SLACK || at.y + at.h > old.y + old.h + SLACK)) {
+      // Keep what the picture shows: the box and crop from the real shot. A
+      // readout whose text differs with the generated probe (VoxPressor's) moves
+      // without the panel having moved, and refusing the whole page for it kept
+      // newly added controls off the page too.
+      console.log(`warn  ${id}: ${c.shot} moved (${old.w}×${old.h} at ${old.x},${old.y} → ${at.w}×${at.h} at ${at.x},${at.y}) — kept the old box; re-shoot to update it`)
+      writes.pop()
+      continue
+    }
+    if (old && (old.w !== at.w || old.h !== at.h || old.x !== at.x || old.y !== at.y)) {
+      console.log(`      ${c.shot}: ${old.w}×${old.h} at ${old.x},${old.y} → ${at.w}×${at.h} at ${at.x},${at.y}`)
+    }
+    manifest.controls[c.shot] = { src: `/help/shots/${slug}/${c.shot}.png`, w: clip.w, h: clip.h, at }
+  }
+  for (const [path, data] of writes) writeFileSync(path, data)
+  console.log(`ok    ${id.padEnd(22)} reboxed`)
+  return manifest
 }
 
 let failures = 0
@@ -201,6 +359,10 @@ try {
   }
 
   for (const id of ids) {
+    // One page failing (a window that vanished mid-shot) is reported and the
+    // run goes on: an exception used to end the whole run.
+    let stage = null
+    try {
     const entry = HELP[id]
     await selectTab(tabFor(id))
     if (SHOT_SETTINGS[id]) {
@@ -245,6 +407,7 @@ try {
       if (rows.length !== CHAIN_SAMPLE.length) { console.log(`FAIL  ${id}: expected ${CHAIN_SAMPLE.length} slots`); failures++ }
     }
 
+
     // Play through the open window so meters, scopes and reduction displays are
     // lit; measurements settle while it runs.
     if (PRESS_FIRST[id]) {
@@ -252,18 +415,39 @@ try {
       await page.waitForTimeout(4000)
     }
     await page.mouse.move(0, 0)
-    await setPlaying(frame, true)
+    await setPlaying(id, frame, true)
     await page.waitForTimeout(SETTLE_MS[id] ?? PLAY_SETTLE_MS)
+    if (REBOX) {
+      // Measured while playing, as the pictures were taken: Preview reads Stop
+      // and the readouts carry live text, so the boxes fit what is shown.
+      const r = await rebox(id, frame)
+      await setPlaying(id, frame, false)
+      if (r) manifests[id] = r; else failures++
+      await page.keyboard.press('Escape'); await page.waitForTimeout(500)
+      while (await page.locator('.win-frame').count()) {
+        await page.locator('.win-frame').last().locator('[aria-label="Close window"]').first().click().catch(() => {})
+        await page.waitForTimeout(300)
+        break
+      }
+      continue
+    }
 
     const slug = helpSlug(id)
-    const outDir = join(ROOT, 'public/help/shots', slug)
+    const finalDir = join(ROOT, 'public/help/shots', slug)
+    // Shot into a staging folder that replaces the old pictures only once the
+    // page is done, so a failure part-way leaves the committed pictures (which
+    // the committed manifest points at) in place.
+    const outDir = stage = `${finalDir}.new`
     rmSync(outDir, { recursive: true, force: true })
     mkdirSync(outDir, { recursive: true })
     const manifest = { panel: null, controls: {} }
 
     const box = await frame.boundingBox()
-    await page.screenshot({ path: join(outDir, 'panel.jpg'), clip: box, type: 'jpeg', quality: 88 })
-    manifest.panel = { src: `/help/shots/${slug}/panel.jpg`, w: Math.round(box.width), h: Math.round(box.height) }
+    await busyShot(id, frame, { path: join(outDir, 'panel.jpg'), clip: box, type: 'jpeg', quality: 88 })
+    manifest.panel = {
+      src: `/help/shots/${slug}/panel.jpg`, w: Math.round(box.width), h: Math.round(box.height),
+      radius: await windowRadius(frame),
+    }
 
     // The faceplate alone, without the window's header (name, presets, ON, ✕)
     // and footer (selection readout, Preview, Apply): the marketing page's
@@ -272,7 +456,7 @@ try {
     const faceEl = frame.locator('.win-face').first()
     const faceBox = (await faceEl.count()) ? await faceEl.boundingBox() : null
     if (faceBox) {
-      await page.screenshot({ path: join(outDir, 'face.jpg'), clip: faceBox, type: 'jpeg', quality: 90 })
+      await busyShot(id, frame, { path: join(outDir, 'face.jpg'), clip: faceBox, type: 'jpeg', quality: 90 })
       manifest.face = {
         src: `/help/shots/${slug}/face.jpg`,
         w: Math.round(faceBox.width), h: Math.round(faceBox.height),
@@ -281,28 +465,24 @@ try {
     }
 
     const missing = []
-    for (const c of entry.controls) {
+    for (const c of [...entry.controls, ...WINDOW_CONTROLS]) {
       if (!c.shot || manifest.controls[c.shot]) continue
       const el = frame.locator(`[data-help="${c.shot}"]`).first()
+      if (WINDOW_SHOTS.has(c.shot) && !(await el.count())) continue // this window has no such control
       // The union of the element and every visible descendant: a lamp or
       // label positioned outside its wrapper's box still belongs in the crop.
-      const b = (await el.count()) ? await el.evaluate((node) => {
-        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
-        for (const n of [node, ...node.querySelectorAll('*')]) {
-          const r = n.getBoundingClientRect()
-          const cs = getComputedStyle(n)
-          if (r.width < 1 || r.height < 1 || cs.visibility === 'hidden' || cs.display === 'none') continue
-          x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top)
-          x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom)
-        }
-        return x0 === Infinity ? null : { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
-      }) : null
-      if (!b || b.width < 2 || b.height < 2) { missing.push(c.shot); continue }
+      // The visible union of the element and its descendants (`lib/controlBox.mjs`).
+      const b = (await el.count()) ? await el.evaluate(measureControlBox) : null
+      if (!b || b.width < 2 || b.height < 2) {
+        // An empty window slot (Peak Normalize has no Preview) is not a missing control.
+        if (!WINDOW_SHOTS.has(c.shot)) missing.push(c.shot)
+        continue
+      }
       const clip = {
         x: Math.max(0, b.x - PAD), y: Math.max(0, b.y - PAD),
         width: b.width + 2 * PAD, height: b.height + 2 * PAD,
       }
-      await page.screenshot({ path: join(outDir, `${c.shot}.png`), clip })
+      await busyShot(id, frame, { path: join(outDir, `${c.shot}.png`), clip })
       manifest.controls[c.shot] = {
         src: `/help/shots/${slug}/${c.shot}.png`, w: Math.round(clip.width), h: Math.round(clip.height),
         // Where the control sits on panel.jpg, in its CSS pixels (unpadded):
@@ -316,11 +496,14 @@ try {
 
     // Written after the browser closes: a file under src/ changing makes the dev
     // server reload the editor, losing the loaded audio mid-run.
+    rmSync(finalDir, { recursive: true, force: true })
+    renameSync(outDir, finalDir)
+    stage = null
     manifests[id] = manifest
     if (missing.length) failures++
     console.log(`${missing.length ? 'FAIL' : 'ok  '}  ${id.padEnd(22)} ${Object.keys(manifest.controls).length} crops${missing.length ? `; not found: ${missing.join(', ')}` : ''}`)
 
-    await setPlaying(frame, false)
+    await setPlaying(id, frame, false)
     await page.keyboard.press('Escape'); await page.waitForTimeout(500)
     // A window that ignores Escape (focus elsewhere) must not leak into the next shot.
     while (await page.locator('.win-frame').count()) {
@@ -328,6 +511,18 @@ try {
       await page.waitForTimeout(300)
       if (await page.locator('.win-frame').count()) { await page.keyboard.press('Escape'); await page.waitForTimeout(300) }
       break
+    }
+    } catch (e) {
+      failures++
+      console.log(`FAIL  ${id}: ${String(e?.message ?? e).split('\n')[0]} — its pictures were left as they were`)
+      if (stage) rmSync(stage, { recursive: true, force: true })
+      // Clear the way for the next page: stop playback, close whatever is open.
+      if (await transportPlaying().catch(() => false)) {
+        await page.evaluate(() => window.dispatchEvent(new CustomEvent('wavely:toggle-play'))).catch(() => {})
+      }
+      for (let i = 0; i < 3 && await page.locator('.win-frame').count().catch(() => 0); i++) {
+        await page.keyboard.press('Escape').catch(() => {}); await page.waitForTimeout(300)
+      }
     }
   }
 } finally {

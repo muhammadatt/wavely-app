@@ -171,6 +171,7 @@ export default {
     },
     {
       label: 'DELTA',
+      shot: 'delta',
       text: 'The header switch plays only what the layers add.',
       details: [
         'Monitoring only: Apply always renders the full processed sound.',

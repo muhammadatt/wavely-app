@@ -18,6 +18,7 @@ export default {
     {
       label: 'Light / dark faceplate',
       shot: 'surface',
+      windowHeader: true,
       text: 'The sun or moon button in the window header switches the faceplate between dark steel and a cream panel.',
       details: [
         'It changes only the look — the sound is identical — and your choice is remembered in this browser.',

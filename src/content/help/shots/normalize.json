@@ -2,18 +2,30 @@
   "panel": {
     "src": "/help/shots/peak-normalize/panel.jpg",
     "w": 380,
-    "h": 426
+    "h": 426,
+    "radius": 22
   },
   "controls": {
     "target-peak": {
       "src": "/help/shots/peak-normalize/target-peak.png",
       "w": 168,
-      "h": 236,
+      "h": 224,
       "at": {
         "x": 112,
-        "y": 80,
+        "y": 92,
         "w": 156,
-        "h": 224
+        "h": 212
+      }
+    },
+    "apply": {
+      "src": "/help/shots/peak-normalize/apply.png",
+      "w": 96,
+      "h": 44,
+      "at": {
+        "x": 280,
+        "y": 380,
+        "w": 84,
+        "h": 32
       }
     }
   },

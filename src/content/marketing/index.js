@@ -203,16 +203,5 @@ export function tryOutFromSearch(search, devBuild = false) {
   }
 }
 
-/**
- * A control's box (`at`, measured on the whole window) on the faceplate crop
- * (`face`: its size and offset in the window), clamped to the face — or null
- * when most of it lies off the face (a control in the window's header). A box
- * a few pixels over the edge is kept: LA Vintage 2A's meter bezel starts 2 px
- * into the header.
- */
-export function spotOnFace(at, face) {
-  const x0 = Math.max(0, at.x - face.x), y0 = Math.max(0, at.y - face.y)
-  const x1 = Math.min(face.w, at.x - face.x + at.w), y1 = Math.min(face.h, at.y - face.y + at.h)
-  if (x1 <= x0 || y1 <= y0) return null
-  return (x1 - x0) * (y1 - y0) >= 0.5 * at.w * at.h ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null
-}
+/** Where a control's box sits on the faceplate crop (shared with the help pages' tour). */
+export { spotOnFace } from '../help/tour.js'

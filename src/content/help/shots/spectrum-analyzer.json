@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/spectrum-analyzer/panel.jpg",
     "w": 700,
-    "h": 495
+    "h": 495,
+    "radius": 22
   },
   "controls": {
     "freeze": {
@@ -10,7 +11,7 @@
       "w": 99,
       "h": 42,
       "at": {
-        "x": 347,
+        "x": 436,
         "y": 15,
         "w": 87,
         "h": 30
@@ -21,7 +22,7 @@
       "w": 123,
       "h": 42,
       "at": {
-        "x": 441,
+        "x": 531,
         "y": 15,
         "w": 111,
         "h": 30
@@ -63,23 +64,23 @@
     "averaging": {
       "src": "/help/shots/spectrum-analyzer/averaging.png",
       "w": 83,
-      "h": 131,
+      "h": 99,
       "at": {
         "x": 531,
-        "y": 352,
+        "y": 384,
         "w": 71,
-        "h": 119
+        "h": 87
       }
     },
     "floor": {
       "src": "/help/shots/spectrum-analyzer/floor.png",
-      "w": 78,
-      "h": 131,
+      "w": 66,
+      "h": 99,
       "at": {
-        "x": 612,
-        "y": 352,
-        "w": 66,
-        "h": 119
+        "x": 618,
+        "y": 384,
+        "w": 54,
+        "h": 87
       }
     }
   },

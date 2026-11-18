@@ -181,6 +181,7 @@ async function applyAndClose() {
   >
     <template #header-center>
       <PresetMenu
+        data-help="presets"
         :presets="presets"
         :accent="ACCENT"
         :disabled="!fetPreview"

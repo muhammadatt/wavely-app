@@ -2,18 +2,19 @@
   "panel": {
     "src": "/help/shots/la-classic-76/panel.jpg",
     "w": 868,
-    "h": 538
+    "h": 538,
+    "radius": 18
   },
   "controls": {
     "input": {
       "src": "/help/shots/la-classic-76/input.png",
-      "w": 188,
-      "h": 211,
+      "w": 172,
+      "h": 190,
       "at": {
-        "x": 30,
+        "x": 38,
         "y": 80,
-        "w": 176,
-        "h": 199
+        "w": 160,
+        "h": 178
       }
     },
     "ratio": {
@@ -29,13 +30,13 @@
     },
     "meter": {
       "src": "/help/shots/la-classic-76/meter.png",
-      "w": 322,
-      "h": 232,
+      "w": 284,
+      "h": 177,
       "at": {
-        "x": 313,
-        "y": 64,
-        "w": 310,
-        "h": 220
+        "x": 332,
+        "y": 80,
+        "w": 272,
+        "h": 165
       }
     },
     "harmonics": {
@@ -51,24 +52,24 @@
     },
     "output": {
       "src": "/help/shots/la-classic-76/output.png",
-      "w": 188,
-      "h": 211,
+      "w": 184,
+      "h": 199,
       "at": {
-        "x": 662,
+        "x": 664,
         "y": 80,
-        "w": 176,
-        "h": 199
+        "w": 172,
+        "h": 187
       }
     },
     "pre-gain": {
       "src": "/help/shots/la-classic-76/pre-gain.png",
       "w": 98,
-      "h": 52,
+      "h": 27,
       "at": {
         "x": 75,
-        "y": 318,
+        "y": 330,
         "w": 86,
-        "h": 40
+        "h": 15
       }
     },
     "sc-hpf": {
@@ -84,24 +85,24 @@
     },
     "attack": {
       "src": "/help/shots/la-classic-76/attack.png",
-      "w": 124,
-      "h": 140,
+      "w": 112,
+      "h": 127,
       "at": {
-        "x": 316,
-        "y": 318,
-        "w": 112,
-        "h": 128
+        "x": 321,
+        "y": 330,
+        "w": 100,
+        "h": 115
       }
     },
     "release": {
       "src": "/help/shots/la-classic-76/release.png",
-      "w": 124,
-      "h": 140,
+      "w": 112,
+      "h": 127,
       "at": {
-        "x": 440,
-        "y": 318,
-        "w": 112,
-        "h": 128
+        "x": 445,
+        "y": 330,
+        "w": 100,
+        "h": 115
       }
     },
     "auto-makeup": {
@@ -117,13 +118,57 @@
     },
     "mix": {
       "src": "/help/shots/la-classic-76/mix.png",
-      "w": 142,
-      "h": 93,
+      "w": 136,
+      "h": 68,
       "at": {
         "x": 688,
-        "y": 365,
-        "w": 130,
-        "h": 81
+        "y": 390,
+        "w": 124,
+        "h": 56
+      }
+    },
+    "presets": {
+      "src": "/help/shots/la-classic-76/presets.png",
+      "w": 99,
+      "h": 42,
+      "at": {
+        "x": 393,
+        "y": 13,
+        "w": 87,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/la-classic-76/bypass.png",
+      "w": 67,
+      "h": 42,
+      "at": {
+        "x": 748,
+        "y": 13,
+        "w": 55,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/la-classic-76/preview.png",
+      "w": 154,
+      "h": 52,
+      "at": {
+        "x": 523,
+        "y": 484,
+        "w": 142,
+        "h": 40
+      }
+    },
+    "apply": {
+      "src": "/help/shots/la-classic-76/apply.png",
+      "w": 193,
+      "h": 52,
+      "at": {
+        "x": 673,
+        "y": 484,
+        "w": 181,
+        "h": 40
       }
     }
   },

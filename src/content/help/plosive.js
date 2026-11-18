@@ -160,6 +160,7 @@ export default {
     },
     {
       label: 'DELTA',
+      shot: 'delta',
       text: 'Plays only what is being removed, from the button in the title bar.',
       details: [
         'It should sound like thumps and short spits, not words. It is for listening only: Apply always renders the processed audio.',

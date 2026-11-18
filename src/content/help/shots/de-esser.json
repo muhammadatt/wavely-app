@@ -2,28 +2,29 @@
   "panel": {
     "src": "/help/shots/de-esser/panel.jpg",
     "w": 820,
-    "h": 769
+    "h": 769,
+    "radius": 22
   },
   "controls": {
     "detect-low": {
       "src": "/help/shots/de-esser/detect-low.png",
-      "w": 102,
+      "w": 95,
       "h": 209,
       "at": {
-        "x": 408,
+        "x": 415,
         "y": 72,
-        "w": 90,
+        "w": 83,
         "h": 197
       }
     },
     "detect-high": {
       "src": "/help/shots/de-esser/detect-high.png",
-      "w": 85,
+      "w": 78,
       "h": 209,
       "at": {
         "x": 653,
         "y": 72,
-        "w": 73,
+        "w": 66,
         "h": 197
       }
     },
@@ -40,12 +41,12 @@
     },
     "out-meter": {
       "src": "/help/shots/de-esser/out-meter.png",
-      "w": 82,
+      "w": 68,
       "h": 223,
       "at": {
-        "x": 736,
+        "x": 741,
         "y": 72,
-        "w": 70,
+        "w": 56,
         "h": 211
       }
     },
@@ -63,34 +64,34 @@
     "amount": {
       "src": "/help/shots/de-esser/amount.png",
       "w": 131,
-      "h": 161,
+      "h": 138,
       "at": {
         "x": 73,
-        "y": 295,
+        "y": 318,
         "w": 119,
-        "h": 149
+        "h": 126
       }
     },
     "split": {
       "src": "/help/shots/de-esser/split.png",
       "w": 212,
-      "h": 68,
+      "h": 64,
       "at": {
         "x": 32,
-        "y": 454,
+        "y": 458,
         "w": 200,
-        "h": 56
+        "h": 52
       }
     },
     "hf-restore": {
       "src": "/help/shots/de-esser/hf-restore.png",
       "w": 107,
-      "h": 159,
+      "h": 135,
       "at": {
         "x": 383,
-        "y": 295,
+        "y": 319,
         "w": 95,
-        "h": 147
+        "h": 123
       }
     },
     "air-auto": {
@@ -107,12 +108,12 @@
     "lisp-guard": {
       "src": "/help/shots/de-esser/lisp-guard.png",
       "w": 107,
-      "h": 159,
+      "h": 135,
       "at": {
         "x": 621,
-        "y": 295,
+        "y": 319,
         "w": 95,
-        "h": 147
+        "h": 123
       }
     },
     "reduction": {
@@ -135,6 +136,61 @@
         "y": 565,
         "w": 792,
         "h": 130
+      }
+    },
+    "delta": {
+      "src": "/help/shots/de-esser/delta.png",
+      "w": 91,
+      "h": 42,
+      "at": {
+        "x": 560,
+        "y": 15,
+        "w": 79,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/de-esser/presets.png",
+      "w": 192,
+      "h": 42,
+      "at": {
+        "x": 320,
+        "y": 15,
+        "w": 180,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/de-esser/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 686,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/de-esser/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 570,
+        "y": 724,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/de-esser/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 650,
+        "y": 724,
+        "w": 154,
+        "h": 32
       }
     }
   },

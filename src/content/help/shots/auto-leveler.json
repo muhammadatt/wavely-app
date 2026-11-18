@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/auto-leveler/panel.jpg",
     "w": 560,
-    "h": 506
+    "h": 506,
+    "radius": 22
   },
   "controls": {
     "target": {
@@ -91,6 +92,17 @@
         "y": 366,
         "w": 532,
         "h": 66
+      }
+    },
+    "apply": {
+      "src": "/help/shots/auto-leveler/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 390,
+        "y": 461,
+        "w": 154,
+        "h": 32
       }
     }
   },

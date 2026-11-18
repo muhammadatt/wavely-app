@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -8,6 +8,8 @@ import {
   HELP, HELP_META, HELP_CATEGORIES, helpFor, helpUrl, publishedHelpIds, listedHelpIds,
   helpSlug, helpIdForSlug,
 } from '../../src/content/help/index.js'
+import { MIN_TOUR_SPOTS, helpTour, helpTourSpots, tourImage } from '../../src/content/help/tour.js'
+import { WINDOW_FOOTER, WINDOW_HEADER, WINDOW_HEADER_GROUP, WINDOW_FOOTER_GROUP, withWindowControls } from '../../src/content/help/window.js'
 import { helpSlugFromPath } from '../../src/help/route.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -64,8 +66,8 @@ test('the registry key and the filename agree', () => {
   // under another id would serve the wrong instructions with nothing to show
   // for it. Catching that here is cheaper than noticing it in the panel.
   const files = readdirSync(HELP_DIR)
-    // index.js and meta.js (titles and slugs) are the directory's own modules, not pages.
-    .filter(f => f.endsWith('.js') && f !== 'index.js' && f !== 'meta.js')
+    // index.js, meta.js (titles and slugs), tour.js (hotspots) and window.js (the window's own controls) are the directory's own modules, not pages.
+    .filter(f => f.endsWith('.js') && !['index.js', 'meta.js', 'tour.js', 'window.js'].includes(f))
     .map(f => f.replace(/\.js$/, ''))
     .sort()
   assert.deepEqual(files, Object.keys(HELP).sort())
@@ -81,13 +83,14 @@ test('every entry has the required shape', () => {
 
     assert.ok(Array.isArray(entry.controls), `${id}: controls must be an array`)
     assert.ok(entry.controls.length >= 1, `${id}: no controls documented`)
-    const CONTROL_KEYS = new Set(['label', 'text', 'group', 'details', 'range', 'default', 'shot'])
+    const CONTROL_KEYS = new Set(['label', 'text', 'group', 'details', 'range', 'default', 'shot', 'windowHeader'])
     for (const c of entry.controls) {
       assert.ok(c.label && typeof c.label === 'string', `${id}: a control has no label`)
       assert.ok(c.text && typeof c.text === 'string', `${id}: ${c.label} has no text`)
       for (const k of ['group', 'range', 'default', 'shot']) {
         if (c[k] !== undefined) assert.ok(typeof c[k] === 'string' && c[k], `${id}: ${c.label}.${k} must be a non-empty string`)
       }
+      if (c.windowHeader !== undefined) assert.equal(c.windowHeader, true, `${id}: ${c.label}.windowHeader must be true`)
       if (c.details !== undefined) {
         assert.ok(Array.isArray(c.details) && c.details.length, `${id}: ${c.label}.details must be a non-empty array`)
       }
@@ -274,9 +277,87 @@ test('every screenshot manifest belongs to a help entry and names real shots', (
     const id = f.replace(/\.json$/, '')
     assert.ok(HELP[id], `shots/${f} has no help entry`)
     const m = JSON.parse(readFileSync(join(dir, f), 'utf8'))
-    const shots = new Set(HELP[id].controls.map(c => c.shot).filter(Boolean))
+    // The page's own shots, plus the window's (ON / BYPASS, DELTA, presets,
+    // Preview, Apply), which help:shots records wherever the window has them.
+    const shots = new Set([...HELP[id].controls, ...WINDOW_HEADER, ...WINDOW_FOOTER].map(c => c.shot).filter(Boolean))
     for (const k of Object.keys(m.controls ?? {})) {
       assert.ok(shots.has(k), `shots/${f}: crop "${k}" is no longer named by any control — re-run npm run help:shots -- ${id}`)
     }
   }
+})
+
+test('every help page with enough numbered controls gets a tour, and only those', () => {
+  const readShots = id => {
+    const f = join(HELP_DIR, 'shots', `${id}.json`)
+    return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null
+  }
+  const without = Object.keys(HELP).filter(id => !helpTour(HELP[id].controls, readShots(id))).sort()
+  // A one-control faceplate keeps the window picture. A page dropping in here
+  // has lost hotspots (a shot renamed, a panel re-laid out): check its boxes.
+  assert.deepEqual(without, ['normalize'])
+  for (const id of without) {
+    const shots = readShots(id)
+    assert.ok(!shots || helpTourSpots(withWindowControls(HELP[id].controls, shots), shots).length < MIN_TOUR_SPOTS)
+  }
+})
+
+test('a tour page puts every documented control with a face box on its faceplate', () => {
+  for (const id of Object.keys(HELP)) {
+    const f = join(HELP_DIR, 'shots', `${id}.json`)
+    if (!existsSync(f)) continue
+    const shots = JSON.parse(readFileSync(f, 'utf8'))
+    if (!helpTour(HELP[id].controls, shots)) continue
+    const controls = withWindowControls(HELP[id].controls, shots)
+    const spots = helpTourSpots(controls, shots)
+    // In the entry's (panel) order, each control once, inside the image.
+    const order = controls.map(c => c.shot)
+    const idx = spots.map(s => order.indexOf(s.id))
+    assert.deepEqual(idx, [...idx].sort((a, b) => a - b), `${id}: hotspots out of panel order`)
+    assert.equal(new Set(spots.map(s => s.id)).size, spots.length)
+    const img = tourImage(shots)
+    for (const s of spots) {
+      assert.ok(s.at.x >= 0 && s.at.y >= 0 && s.at.x + s.at.w <= img.w && s.at.y + s.at.h <= img.h, `${id}: ${s.id} off the image`)
+    }
+  }
+})
+
+test('the tour skips controls with no shot or off the faceplate', () => {
+  const shots = {
+    face: { src: 'f', w: 400, h: 200, x: 0, y: 50 },
+    controls: { a: { at: { x: 10, y: 60, w: 50, h: 50 } }, head: { at: { x: 10, y: 5, w: 30, h: 30 } } },
+  }
+  const spots = helpTourSpots([
+    { label: 'A', text: 'a', shot: 'a' },
+    { label: 'No shot', text: 'n' },
+    { label: 'Header', text: 'h', shot: 'head' },
+    { label: 'Missing', text: 'm', shot: 'missing' },
+  ], shots)
+  assert.deepEqual(spots, [{ id: 'a', label: 'A', text: 'a', at: { x: 10, y: 10, w: 50, h: 50 } }])
+  assert.deepEqual(tourImage({ panel: { src: 'p', w: 1, h: 2 } }), { src: 'p', w: 1, h: 2, x: 0, y: 0 })
+  assert.equal(tourImage(null), null)
+})
+
+test('the window\'s own controls frame each page: header first, page in between, footer last', () => {
+  const shots = { controls: { bypass: {}, delta: {}, apply: {} } }
+  const own = [
+    { label: 'Amount', shot: 'amount', text: 'a' },
+    { label: 'DELTA', shot: 'delta', text: 'The page\'s own DELTA.' },
+  ]
+  const out = withWindowControls(own, shots)
+  assert.deepEqual(out.map(c => c.shot), ['delta', 'bypass', 'amount', 'apply'])  // presets, when shown, comes first
+  // The page's own text wins, moved into the header group.
+  assert.equal(out[0].text, 'The page\'s own DELTA.')
+  assert.equal(out[0].group, WINDOW_HEADER_GROUP)
+  assert.equal(out[2].group, 'Panel')
+  assert.equal(out[3].group, WINDOW_FOOTER_GROUP)
+  // A window control the screenshot does not show gets no entry.
+  assert.ok(!out.some(c => c.shot === 'presets' || c.shot === 'preview'))
+})
+
+test('a page control in the header slot is numbered between the presets and DELTA', () => {
+  const shots = { controls: { presets: {}, delta: {}, bypass: {}, surface: {} } }
+  const own = [{ label: 'Surface', shot: 'surface', windowHeader: true }, { label: 'Amount', shot: 'amount' }]
+  const out = withWindowControls(own, shots)
+  assert.deepEqual(out.map(c => c.shot), ['presets', 'surface', 'delta', 'bypass', 'amount'])
+  assert.equal(out[1].group, WINDOW_HEADER_GROUP)
 })

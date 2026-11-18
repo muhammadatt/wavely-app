@@ -122,6 +122,7 @@ export default {
     },
     {
       label: 'DELTA',
+      shot: 'delta',
       text: 'In the window header: plays only what the stage is removing, so you can hear exactly what is being taken off the peaks.',
       details: [
         'It is for listening only — Apply always renders the processed audio.',

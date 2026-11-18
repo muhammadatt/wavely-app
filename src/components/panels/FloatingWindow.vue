@@ -876,6 +876,7 @@ function requestClose() {
       <div class="win-center flex items-center justify-center min-w-0">
         <ModulaPresetBrowser
           v-if="modula && presets"
+          data-help="presets"
           class="win-presets-m"
           :presets="presets"
           :disabled="presetsDisabled"
@@ -896,6 +897,7 @@ function requestClose() {
           <slot name="header-controls" />
           <ModulaLedPill
             v-if="showDelta && modula"
+            data-help="delta"
             size="sm" label="DELTA" color="var(--m-second)"
             :model-value="delta" :disabled="deltaDisabled" :title="deltaTitle"
             @pointerdown.stop
@@ -903,6 +905,7 @@ function requestClose() {
           />
           <button
             v-if="showDelta && !modula"
+            data-help="delta"
             type="button"
             class="win-chip"
             :class="{ 'win-chip--on': delta }"
@@ -918,7 +921,7 @@ function requestClose() {
         <div class="win-switches flex items-center gap-2.5">
         <!-- Modula: a fixed 96 px slot, so ON and BYPASS (different lengths)
              never move the close button. -->
-        <span v-if="showEngage && modula" class="win-engage-slot-m">
+        <span v-if="showEngage && modula" class="win-engage-slot-m" data-help="bypass">
           <button
             type="button"
             class="win-pill-m"
@@ -933,6 +936,7 @@ function requestClose() {
         </span>
         <button
           v-if="showEngage && !modula"
+          data-help="bypass"
           type="button"
           class="win-chip"
           :class="{ 'win-chip--on': engaged }"
@@ -1066,6 +1070,7 @@ function requestClose() {
         -->
         <span
           v-if="showPreview"
+          data-help="preview"
           class="win-preview-slot"
           :class="{ 'win-preview-slot--inert': !previewable }"
           :title="previewable
@@ -1091,6 +1096,7 @@ function requestClose() {
 
         <button
           v-if="showApply"
+          data-help="apply"
           type="button"
           class="win-apply"
           :disabled="applyBlocked"

@@ -2,7 +2,8 @@
   "panel": {
     "src": "/help/shots/eq/panel.jpg",
     "w": 664,
-    "h": 776
+    "h": 776,
+    "radius": 22
   },
   "controls": {
     "analyzer": {
@@ -40,24 +41,24 @@
     },
     "in": {
       "src": "/help/shots/eq/in.png",
-      "w": 83,
+      "w": 68,
       "h": 353,
       "at": {
-        "x": 14,
+        "x": 20,
         "y": 361,
-        "w": 71,
+        "w": 56,
         "h": 341
       }
     },
     "band-gain": {
       "src": "/help/shots/eq/band-gain.png",
       "w": 74,
-      "h": 121,
+      "h": 99,
       "at": {
         "x": 145,
-        "y": 356,
+        "y": 378,
         "w": 62,
-        "h": 109
+        "h": 87
       }
     },
     "band-shape": {
@@ -74,23 +75,23 @@
     "band-freq": {
       "src": "/help/shots/eq/band-freq.png",
       "w": 64,
-      "h": 113,
+      "h": 90,
       "at": {
         "x": 150,
-        "y": 469,
+        "y": 492,
         "w": 52,
-        "h": 101
+        "h": 78
       }
     },
     "band-width": {
       "src": "/help/shots/eq/band-width.png",
       "w": 64,
-      "h": 113,
+      "h": 90,
       "at": {
         "x": 150,
-        "y": 547,
+        "y": 570,
         "w": 52,
-        "h": 101
+        "h": 78
       }
     },
     "band-on": {
@@ -128,13 +129,57 @@
     },
     "out": {
       "src": "/help/shots/eq/out.png",
-      "w": 83,
+      "w": 68,
       "h": 353,
       "at": {
-        "x": 579,
+        "x": 589,
         "y": 361,
-        "w": 71,
+        "w": 56,
         "h": 341
+      }
+    },
+    "presets": {
+      "src": "/help/shots/eq/presets.png",
+      "w": 192,
+      "h": 42,
+      "at": {
+        "x": 242,
+        "y": 15,
+        "w": 180,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/eq/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 530,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/eq/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 414,
+        "y": 731,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/eq/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 494,
+        "y": 731,
+        "w": 154,
+        "h": 32
       }
     }
   },

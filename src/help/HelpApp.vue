@@ -15,10 +15,14 @@
  * small, and a link is what a user expects to be able to open in another tab,
  * bookmark or send to someone.
  */
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   HELP, HELP_META, HELP_CATEGORIES, publishedHelpIds, listedHelpIds, helpUrl, helpIdForSlug,
 } from '../content/help/index.js'
+import { helpPage } from '../content/help/tour.js'
+// The marketing pages' interactive faceplate. A self-contained component (it
+// imports nothing), so the help bundle still carries none of the editor.
+import PanelTour from '../components/tour/PanelTour.vue'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
 import { helpSlugFromPath } from './route.js'
 
@@ -53,10 +57,74 @@ const shots = entry ? SHOTS[id] ?? null : null
  * second section on the panel, not the first one continued.
  */
 const controlGroups = []
-for (const c of entry?.controls ?? []) {
+// The page's controls with the window's own around them (header first, footer
+// last) and its tour, from one merge (`helpPage`), so the entries and the
+// tour's numbers cannot drift apart.
+const page = entry ? helpPage(entry.controls, shots) : { controls: [], tour: null }
+const pageControls = page.controls
+for (const c of pageControls) {
   const last = controlGroups[controlGroups.length - 1]
   if (last && last.group === (c.group ?? null)) last.controls.push(c)
   else controlGroups.push({ group: c.group ?? null, controls: [c] })
+}
+
+/**
+ * The tour (every page with enough numbered controls, `helpTour`): the faceplate with every
+ * documented control outlined and numbered, in place of the static window
+ * picture. Each numbered control's entry below carries the same number, and
+ * the two link both ways — the caption jumps to the entry, the entry's number
+ * lights the control on the faceplate and scrolls back up to it.
+ */
+const pageTour = page.tour
+const tourShot = pageTour?.image ?? null
+const tourSpots = pageTour?.spots ?? []
+const tourIndex = new Map(tourSpots.map((s, i) => [s.id, i]))
+const tourActive = ref(0)
+const tourEl = ref(null)
+const tour = ref(null)
+
+/** The control's number on the tour, or null when it has no hotspot. */
+function tourNumber(c) {
+  const i = c.shot ? tourIndex.get(c.shot) : undefined
+  return i === undefined ? null : i + 1
+}
+/** An entry's anchor: the control's shot id, which the tour links to. */
+const controlAnchor = c => (c.shot && tourIndex.has(c.shot) ? `control-${c.shot}` : undefined)
+const detailHref = s => `#control-${s.id}`
+
+/**
+ * An entry's number: select its control, move keyboard focus onto it (a
+ * keyboard user was left down on the entry while the page scrolled away) and
+ * bring the faceplate into view.
+ */
+function showOnPanel(c) {
+  tour.value?.focusSpot(tourIndex.get(c.shot))
+  tourEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+/**
+ * The entry's highlight is a `:target` animation, which plays once per hash:
+ * following the same "Full description" link twice scrolled to the entry
+ * with no highlight the second time. Restart it.
+ */
+function replayTarget(e) {
+  const a = e.target.closest?.('a.pt-caption-more')
+  if (!a || a.getAttribute('href') !== window.location.hash) return
+  const el = document.getElementById(window.location.hash.slice(1))
+  if (!el) return
+  el.style.animation = 'none'
+  void el.offsetWidth
+  el.style.animation = ''
+}
+
+/**
+ * The window picture's corners, rounded as the window's are (`radius`, recorded
+ * by help:shots). panel.jpg is a rectangle, and its corners hold what sat
+ * behind the window in the editor — at the page's old fixed 14 px a sliver of
+ * the cyan waveform showed in each. In percent, so it scales with the image.
+ */
+function panelRadius(p) {
+  if (!p?.radius) return null
+  return { borderRadius: `${(p.radius / p.w) * 100}% / ${(p.radius / p.h) * 100}%` }
 }
 
 /** A crop for a control, or null; CSS size capped so a wide strip fits. */
@@ -133,6 +201,23 @@ onMounted(() => {
           <h1 class="hp-title">{{ meta.title }}</h1>
           <p class="hp-summary">{{ entry.summary }}</p>
 
+          <!-- The tour sits above the fold, before the intro (owner, November
+               2026): the panel is what a reader came to look at. The entries it
+               numbers stay under Interface and controls, linked both ways. -->
+          <div v-if="tourSpots.length" ref="tourEl" class="hp-tour" @click="replayTarget">
+            <p class="hp-tour-lede">Hint: Click on any numbered control to see what it does.</p>
+            <PanelTour
+              ref="tour"
+              eager
+              v-model:active="tourActive"
+              :image="tourShot"
+              :spots="tourSpots"
+              :list="false"
+              :detail-href="detailHref"
+              :alt="`The ${meta.title} faceplate`"
+            />
+          </div>
+
           <section class="hp-section">
             <h2 class="hp-heading">Intro</h2>
             <p v-for="(para, i) in entry.intro" :key="i" class="hp-intro-text">{{ para }}</p>
@@ -147,11 +232,12 @@ onMounted(() => {
 
           <section class="hp-section">
             <h2 class="hp-heading">Interface and controls</h2>
-            <figure v-if="shots?.panel" class="hp-panel">
+            <figure v-if="!tourSpots.length && shots?.panel" class="hp-panel">
               <img
                 :src="shots.panel.src"
                 :width="shots.panel.w"
                 :height="shots.panel.h"
+                :style="panelRadius(shots.panel)"
                 :alt="`The ${meta.title} window`"
                 loading="lazy"
               />
@@ -162,6 +248,7 @@ onMounted(() => {
               <div class="hp-controls">
                 <div
                   v-for="c in g.controls"
+                  :id="controlAnchor(c)"
                   :key="c.label"
                   class="hp-control"
                   :class="{ 'hp-control--shot': crop(c) }"
@@ -176,7 +263,17 @@ onMounted(() => {
                     />
                   </div>
                   <div class="hp-control-body">
-                    <h4 class="hp-control-label">{{ c.label }}</h4>
+                    <h4 class="hp-control-label">
+                      <button
+                        v-if="tourNumber(c)"
+                        type="button"
+                        class="hp-control-n"
+                        :aria-label="`Show ${c.label} on the panel`"
+                        title="Show on the panel"
+                        @click="showOnPanel(c)"
+                      >{{ tourNumber(c) }}</button>
+                      {{ c.label }}
+                    </h4>
                     <p class="hp-control-text">{{ c.text }}</p>
                     <p v-for="(d, di) in c.details ?? []" :key="di" class="hp-control-detail">{{ d }}</p>
                     <dl v-if="c.range || c.default" class="hp-spec">
@@ -459,6 +556,70 @@ a:focus-visible {
   height: auto;
   border-radius: 14px;
   box-shadow: 0 0 0 1px var(--hp-hairline), 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* The tour: the faceplate, numbered. Its colours come from PanelTour's
+   defaults, which are this page's palette. */
+.hp-tour {
+  margin: 28px 0 0;
+  scroll-margin-top: 76px;
+}
+.hp-tour-lede {
+  margin: 0 0 14px;
+  color: var(--hp-soft);
+  font-size: 12px;
+}
+/* An entry the tour's caption jumped to: clear of the sticky bar, and lit. */
+.hp-control[id] {
+  scroll-margin-top: 84px;
+}
+/* Held lit for a beat, then faded: an amber block grown 12 px past the entry
+   (box-shadow spread, so the layout does not move) with an amber ring. The
+   first version was a 12 % tint fading over 1.6 s and was easy to miss. */
+.hp-control:target {
+  border-radius: 10px;
+  outline: 1.5px solid transparent;
+  outline-offset: 12px;
+  animation: hp-target 3.2s ease-in forwards;
+}
+@keyframes hp-target {
+  0%,
+  45% {
+    background-color: rgba(232, 163, 61, 0.2);
+    box-shadow: 0 0 0 12px rgba(232, 163, 61, 0.2);
+    outline-color: rgba(232, 163, 61, 0.9);
+  }
+  100% {
+    background-color: rgba(232, 163, 61, 0);
+    box-shadow: 0 0 0 12px rgba(232, 163, 61, 0);
+    outline-color: rgba(232, 163, 61, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hp-control:target { animation: none; outline-color: rgba(232, 163, 61, 0.9); }
+}
+/* The control's tour number, amber like the tour; a button back up to it. */
+.hp-control-n {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-right: 8px;
+  padding: 0 5px;
+  vertical-align: 1px;
+  border: 1px solid rgba(232, 163, 61, 0.5);
+  border-radius: 11px;
+  background: rgba(11, 14, 18, 0.9);
+  color: #e8a33d;
+  font: 600 11px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.hp-control-n:hover,
+.hp-control-n:focus-visible {
+  background: #e8a33d;
+  color: #06181b;
+  outline: none;
 }
 
 /* A panel section (DE-ESS, AIR…), as printed. */

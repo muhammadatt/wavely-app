@@ -2,18 +2,19 @@
   "panel": {
     "src": "/help/shots/hi-freq-limiter/panel.jpg",
     "w": 760,
-    "h": 524
+    "h": 524,
+    "radius": 22
   },
   "controls": {
     "threshold": {
       "src": "/help/shots/hi-freq-limiter/threshold.png",
       "w": 116,
-      "h": 128,
+      "h": 116,
       "at": {
         "x": 46,
-        "y": 141,
+        "y": 153,
         "w": 104,
-        "h": 116
+        "h": 104
       }
     },
     "shape": {
@@ -41,67 +42,67 @@
     "curve": {
       "src": "/help/shots/hi-freq-limiter/curve.png",
       "w": 440,
-      "h": 226,
+      "h": 224,
       "at": {
         "x": 200,
         "y": 151,
         "w": 428,
-        "h": 214
+        "h": 212
       }
     },
     "freq": {
       "src": "/help/shots/hi-freq-limiter/freq.png",
-      "w": 106,
-      "h": 135,
+      "w": 102,
+      "h": 132,
       "at": {
-        "x": 649,
-        "y": 99,
-        "w": 94,
-        "h": 123
+        "x": 651,
+        "y": 102,
+        "w": 90,
+        "h": 120
       }
     },
     "range": {
       "src": "/help/shots/hi-freq-limiter/range.png",
-      "w": 106,
-      "h": 135,
+      "w": 102,
+      "h": 132,
       "at": {
-        "x": 649,
-        "y": 228,
-        "w": 94,
-        "h": 123
+        "x": 651,
+        "y": 231,
+        "w": 90,
+        "h": 120
       }
     },
     "transient": {
       "src": "/help/shots/hi-freq-limiter/transient.png",
       "w": 153,
-      "h": 83,
+      "h": 77,
       "at": {
         "x": 11,
-        "y": 386,
+        "y": 391,
         "w": 141,
-        "h": 71
+        "h": 65
       }
     },
     "release": {
       "src": "/help/shots/hi-freq-limiter/release.png",
-      "w": 128,
-      "h": 83,
+      "w": 127,
+      "h": 77,
       "at": {
-        "x": 204,
-        "y": 386,
-        "w": 116,
-        "h": 71
+        "x": 205,
+        "y": 391,
+        "w": 115,
+        "h": 65
       }
     },
     "output": {
       "src": "/help/shots/hi-freq-limiter/output.png",
-      "w": 134,
-      "h": 83,
+      "w": 128,
+      "h": 77,
       "at": {
-        "x": 366,
-        "y": 386,
-        "w": 122,
-        "h": 71
+        "x": 372,
+        "y": 391,
+        "w": 116,
+        "h": 65
       }
     },
     "in-out": {
@@ -113,6 +114,61 @@
         "y": 402,
         "w": 196,
         "h": 45
+      }
+    },
+    "delta": {
+      "src": "/help/shots/hi-freq-limiter/delta.png",
+      "w": 91,
+      "h": 42,
+      "at": {
+        "x": 500,
+        "y": 15,
+        "w": 79,
+        "h": 30
+      }
+    },
+    "presets": {
+      "src": "/help/shots/hi-freq-limiter/presets.png",
+      "w": 192,
+      "h": 42,
+      "at": {
+        "x": 290,
+        "y": 15,
+        "w": 180,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/hi-freq-limiter/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 626,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/hi-freq-limiter/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 510,
+        "y": 479,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/hi-freq-limiter/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 590,
+        "y": 479,
+        "w": 154,
+        "h": 32
       }
     }
   },

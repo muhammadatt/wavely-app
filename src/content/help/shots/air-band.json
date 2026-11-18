@@ -2,62 +2,107 @@
   "panel": {
     "src": "/help/shots/air-boost/panel.jpg",
     "w": 680,
-    "h": 545
+    "h": 545,
+    "radius": 22
   },
   "controls": {
     "in-meter": {
       "src": "/help/shots/air-boost/in-meter.png",
-      "w": 82,
-      "h": 303,
+      "w": 68,
+      "h": 279,
       "at": {
-        "x": 14,
-        "y": 72,
-        "w": 70,
-        "h": 291
+        "x": 24,
+        "y": 84,
+        "w": 56,
+        "h": 267
       }
     },
     "curve": {
       "src": "/help/shots/air-boost/curve.png",
       "w": 476,
-      "h": 138,
+      "h": 136,
       "at": {
         "x": 108,
         "y": 86,
         "w": 464,
-        "h": 126
+        "h": 124
       }
     },
     "air": {
       "src": "/help/shots/air-boost/air.png",
-      "w": 158,
-      "h": 226,
+      "w": 146,
+      "h": 208,
       "at": {
-        "x": 267,
-        "y": 214,
-        "w": 146,
-        "h": 214
+        "x": 273,
+        "y": 232,
+        "w": 134,
+        "h": 196
       }
     },
     "out-meter": {
       "src": "/help/shots/air-boost/out-meter.png",
-      "w": 87,
-      "h": 363,
+      "w": 68,
+      "h": 339,
       "at": {
-        "x": 591,
-        "y": 72,
-        "w": 75,
-        "h": 351
+        "x": 601,
+        "y": 84,
+        "w": 56,
+        "h": 327
       }
     },
     "output": {
       "src": "/help/shots/air-boost/output.png",
-      "w": 71,
-      "h": 86,
+      "w": 44,
+      "h": 64,
       "at": {
-        "x": 591,
-        "y": 337,
+        "x": 605,
+        "y": 359,
+        "w": 32,
+        "h": 52
+      }
+    },
+    "presets": {
+      "src": "/help/shots/air-boost/presets.png",
+      "w": 192,
+      "h": 42,
+      "at": {
+        "x": 250,
+        "y": 15,
+        "w": 180,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/air-boost/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 546,
+        "y": 15,
         "w": 59,
-        "h": 74
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/air-boost/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 430,
+        "y": 500,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/air-boost/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 510,
+        "y": 500,
+        "w": 154,
+        "h": 32
       }
     }
   },
