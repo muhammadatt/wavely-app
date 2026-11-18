@@ -15,6 +15,7 @@ import {
 } from '../audio/operations.js'
 import { stopPlayback } from '../audio/playback.js'
 import { getDefaultOutputProfile, isOutputProfileLocked } from '../audio/presets.js'
+import { setPlaybackAudioSession, keepContextRunning, needsResume } from '../platform/audioSession.js'
 
 const UNDO_STACK_CAP = 50
 
@@ -289,10 +290,14 @@ export function useEditorState() {
   // AudioContext management
   function getAudioContext() {
     if (!audioContext) {
+      // Before the context exists, so iOS plays with the silent switch on.
+      setPlaybackAudioSession()
       audioContext = new (window.AudioContext || window.webkitAudioContext)()
+      keepContextRunning(audioContext)
     }
-    if (audioContext.state === 'suspended') {
-      audioContext.resume()
+    // 'interrupted' too (Safari, after a call or another app took the audio).
+    if (needsResume(audioContext)) {
+      audioContext.resume()?.catch?.(() => {})
     }
     return audioContext
   }

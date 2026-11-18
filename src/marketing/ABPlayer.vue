@@ -25,6 +25,7 @@
  * by default: the level is part of what the effect does.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { setPlaybackAudioSession, needsResume } from '../platform/audioSession.js'
 
 const props = defineProps({
   /** [{ id, title, text, setting, audio: { on, off, seconds, levelDb, placeholder? } }] */
@@ -147,8 +148,13 @@ async function play() {
   // Create and resume the context inside the click, before anything is awaited:
   // after a first-time fetch the gesture has expired and Safari / iOS keep the
   // context suspended.
-  if (!ctx) ctx = new AudioContext()
-  const resumed = ctx.state === 'suspended' ? ctx.resume() : null
+  // The playback session first, so an iPhone on silent still plays the clip.
+  if (!ctx) {
+    setPlaybackAudioSession()
+    ctx = new AudioContext()
+  }
+  // 'interrupted' too: Safari's state after a call or another app's audio.
+  const resumed = needsResume(ctx) ? ctx.resume() : null
   const pair = await ensureLoaded()
   if (!pair) return
   if (resumed) await resumed
