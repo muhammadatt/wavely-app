@@ -160,10 +160,19 @@ try {
     await page.keyboard.type(name); await page.waitForTimeout(450)
     await page.keyboard.press('Enter'); await page.waitForTimeout(3000)
     const opened = await page.evaluate(() => !!document.querySelector('.win-frame'))
+    // The preset browser sits on the window's axis (FloatingWindow's header
+    // grid + balanceHeader): null where the window has none.
+    const offCentre = await page.evaluate(() => {
+      const f = document.querySelector('.win-frame'), p = f?.querySelector('.win-presets-m')
+      if (!p) return null
+      const fb = f.getBoundingClientRect(), pb = p.getBoundingClientRect()
+      return Math.round(pb.left + pb.width / 2 - (fb.left + fb.width / 2))
+    })
+    const centred = offCentre == null || Math.abs(offCentre) <= 1
     const fresh = errors.slice(before)
-    const ok = opened && fresh.length === 0
+    const ok = opened && centred && fresh.length === 0
     if (!ok) failures++
-    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name.padEnd(16)} ${opened ? '' : 'did not open (renamed in the registry?) '}${fresh.join(' | ')}`)
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name.padEnd(16)} ${opened ? '' : 'did not open (renamed in the registry?) '}${centred ? '' : `presets ${offCentre} px off centre `}${fresh.join(' | ')}`)
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
   }
 
@@ -203,7 +212,7 @@ try {
     await addFromPicker('Inflator')
     await addFromPicker('Air Boost')
     const groupWindows = await frames()
-    const inflatorWin = page.locator('.win-frame').filter({ has: page.locator('.win-chain-badge[aria-label*="slot 1,"], .win-chain-badge[aria-label*="slot 1."]') })
+    const inflatorWin = page.locator('.win-frame').filter({ has: page.locator('.win-chain-badge[data-chain-slot="1"]') })
     const memberApplyOff = await inflatorWin.locator('.win-apply').isDisabled().catch(() => false)
 
     // A plugin outside the chain bypasses it (it must preview what its own

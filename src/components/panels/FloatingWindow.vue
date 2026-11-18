@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, useSlots } from 'vue'
 import { useWindows, CHAIN_WINDOW_ID } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
@@ -521,9 +521,16 @@ const headLeftEl = ref(null)
 const headRightEl = ref(null)
 const headerSide = ref(null)
 const CENTER_MIN_PX = 120
+// What the centre column holds — read by the header's classes and the CSS that
+// places row 2 on a narrow sheet, so it is said once here.
+const slots = useSlots()
+const hasPresets = computed(() => modula.value && !!props.presets)
+const hasCenter = computed(() => hasPresets.value || !!slots['header-center'])
 function balanceHeader() {
   const h = headerEl.value, l = headLeftEl.value, r = headRightEl.value
   if (!h || !l || !r) return
+  // Nothing in the centre: nothing to put on the axis.
+  if (!hasCenter.value) { headerSide.value = null; return }
   const cs = getComputedStyle(h)
   const inner = h.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
   const gaps = 2 * (parseFloat(cs.columnGap) || 0)
@@ -533,7 +540,7 @@ function balanceHeader() {
 let headRo = null
 
 onMounted(() => {
-  if (typeof ResizeObserver !== 'undefined') {
+  if (hasCenter.value && typeof ResizeObserver !== 'undefined') {
     headRo = new ResizeObserver(balanceHeader)
     for (const el of [headerEl.value, headLeftEl.value, headRightEl.value]) if (el) headRo.observe(el)
   }
@@ -779,7 +786,7 @@ function requestClose() {
     <div
       ref="headerEl"
       class="win-header grid items-center touch-none h-14 shrink-0 pl-5 pr-[14px]"
-      :class="[sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab', { 'is-narrow': narrowSheet, 'has-presets': modula && presets, 'has-center': (modula && presets) || $slots['header-center'], 'is-balanced': headerSide != null && !narrowSheet }]"
+      :class="[sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab', { 'is-narrow': narrowSheet, 'has-presets': hasPresets, 'has-center': hasCenter, 'is-balanced': headerSide != null && !narrowSheet }]"
       :style="headerSide != null ? { '--win-side': headerSide + 'px' } : undefined"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
@@ -822,6 +829,7 @@ function requestClose() {
           v-if="inChain"
           type="button"
           class="win-chain-badge"
+          :data-chain-slot="inChain.position"
           :class="{ 'is-bypassed': inChain.chainBypassed }"
           :title="inChain.chainBypassed
             ? `In the Effect Chain, slot ${inChain.position} — the chain is bypassed. Open it to turn it on`
@@ -1857,6 +1865,17 @@ function requestClose() {
   grid-row: 2;
   justify-self: end;
   padding-bottom: 8px;
+  /* It shares column 2 with ON and close: capped, so a wide group scrolls
+     sideways (the old row 2's last resort) instead of widening the column
+     and squeezing the name on row 1. */
+  min-width: 0;
+  max-width: 45vw;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* A scroll box clips: room for the pills' raised shadows, given back by
+     the margins so the layout does not move. */
+  padding: 4px 6px 8px;
+  margin: -4px -6px 0;
 }
 .win-header.is-narrow:not(.has-center) .win-center {
   display: none;
@@ -1864,6 +1883,7 @@ function requestClose() {
 .win-header.is-narrow:not(.has-center) .win-monitor {
   grid-column: 1 / -1;
   justify-self: center;
+  max-width: calc(100% + 12px);
 }
 .win-header.is-narrow:has(.win-monitor:empty) .win-center {
   grid-column: 1 / -1;
