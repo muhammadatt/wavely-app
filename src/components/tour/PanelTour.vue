@@ -262,6 +262,10 @@ defineExpose({ focusSpot })
 .pt-figure { margin: 0; min-width: 0; }
 .pt-stage {
   position: relative;
+  /* The hotspots' z-indices (nested controls on top) stay inside the tour:
+     without a stacking context they painted over the help page's sticky
+     header when scrolled under it and took its clicks. */
+  isolation: isolate;
   border-radius: 14px;
   overflow: hidden;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--tour-hairline, rgba(255, 255, 255, 0.08));
@@ -315,6 +319,11 @@ defineExpose({ focusSpot })
   color: var(--pt-accent);
   font: 600 10px/16px 'JetBrains Mono', ui-monospace, monospace;
   text-align: center;
+  /* The outline ignores the pointer, but the number usually sits OUTSIDE the
+     control's hit area (placeBadges); it is part of its button, so a click on
+     it selects the control. */
+  pointer-events: auto;
+  cursor: pointer;
 }
 .pt-spot--on .pt-badge { background: var(--pt-accent); color: #06181b; border-color: var(--pt-accent); }
 
