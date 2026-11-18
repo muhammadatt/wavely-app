@@ -397,7 +397,11 @@ try {
       // label positioned outside its wrapper's box still belongs in the crop.
       // The visible union of the element and its descendants (`lib/controlBox.mjs`).
       const b = (await el.count()) ? await el.evaluate(measureControlBox) : null
-      if (!b || b.width < 2 || b.height < 2) { missing.push(c.shot); continue }
+      if (!b || b.width < 2 || b.height < 2) {
+        // An empty window slot (Peak Normalize has no Preview) is not a missing control.
+        if (!WINDOW_SHOTS.has(c.shot)) missing.push(c.shot)
+        continue
+      }
       const clip = {
         x: Math.max(0, b.x - PAD), y: Math.max(0, b.y - PAD),
         width: b.width + 2 * PAD, height: b.height + 2 * PAD,
