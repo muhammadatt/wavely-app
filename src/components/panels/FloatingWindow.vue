@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, useSlots } from 'vue'
 import { useWindows, CHAIN_WINDOW_ID } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
@@ -488,8 +488,8 @@ function updateOverflow() {
 let previouslyFocused = null
 
 // ── Chain membership ────────────────────────────────────────────────────────
-// A plugin with a slot in the Plugin Chain says so (IN CHAIN · n, which opens
-// the rack) and has NO APPLY of its own: the chain's Apply is the one that
+// A plugin with a slot in the Plugin Chain says so (a chain badge with its slot
+// number by the name, which opens the rack) and has NO APPLY of its own: the chain's Apply is the one that
 // writes it, in order with the rest. Joining happens only from the chain's
 // Add picker, so a plugin outside the chain shows nothing here.
 const inChain = computed(() => {
@@ -508,7 +508,44 @@ const brandSep = computed(() => (props.brandTail && !props.brandJoined ? ' ' : '
 // Accessible name, read off the brand mark.
 const label = computed(() => `${props.brandLead}${brandSep.value}${props.brandTail}`.trim())
 
+// ── Header balance ─────────────────────────────────────────────────────────
+// The grid alone (see the header CSS) grows the preset browser to 180 px
+// BEFORE it balances the sides, so a long name in a narrow window (CAMBRIDGE
+// INFLATOR at 660 px) left it 26 px off the axis. When both sides at the
+// WIDER side's width still leave the centre its 120 px minimum, each side
+// column is given that width as its minimum: the centre is then exactly on
+// the window's axis and it is the preset browser that gives way. When they do
+// not, the plain grid's "give way only as far as you must" takes over.
+const headerEl = ref(null)
+const headLeftEl = ref(null)
+const headRightEl = ref(null)
+const headerSide = ref(null)
+const CENTER_MIN_PX = 120
+// What the centre column holds — read by the header's classes and the CSS that
+// places row 2 on a narrow sheet, so it is said once here.
+const slots = useSlots()
+const hasPresets = computed(() => modula.value && !!props.presets)
+const hasCenter = computed(() => hasPresets.value || !!slots['header-center'])
+function balanceHeader() {
+  const h = headerEl.value, l = headLeftEl.value, r = headRightEl.value
+  if (!h || !l || !r) return
+  // Nothing in the centre: nothing to put on the axis.
+  if (!hasCenter.value) { headerSide.value = null; return }
+  const cs = getComputedStyle(h)
+  const inner = h.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+  const gaps = 2 * (parseFloat(cs.columnGap) || 0)
+  const side = Math.ceil(Math.max(l.offsetWidth, r.offsetWidth))
+  headerSide.value = 2 * side + CENTER_MIN_PX + gaps <= inner ? side : null
+}
+let headRo = null
+
 onMounted(() => {
+  if (hasCenter.value && typeof ResizeObserver !== 'undefined') {
+    headRo = new ResizeObserver(balanceHeader)
+    for (const el of [headerEl.value, headLeftEl.value, headRightEl.value]) if (el) headRo.observe(el)
+  }
+  balanceHeader()
+
   // A plugin keeps playing in the chain while its window is closed, with its
   // meters stopped; reopening the window brings them back.
   chainWindowMounted(windowId)
@@ -571,6 +608,7 @@ onBeforeUnmount(() => {
   chainWindowUnmounted(windowId)
   window.removeEventListener('resize', onViewportResize)
   bodyRo?.disconnect()
+  headRo?.disconnect()
   savePosition(windowId, pos.value)
   // Return focus only if it is still inside this window; if the user has since
   // clicked the waveform, yanking it back would be worse than leaving it.
@@ -733,16 +771,23 @@ function requestClose() {
     <!--
       Header (drag handle).
 
-      A 1fr / auto / 1fr grid rather than space-between: identity left,
-      monitoring and presets centred, window controls right. Space-between put
-      the middle group wherever the two outer groups' widths happened to leave
-      it, so DELTA sat visibly off-centre and moved as a brand mark got longer.
-      A grid centres the middle column against the WINDOW, which is what makes
-      it read as the header's own axis instead of as a gap.
+      Identity left, the PRESETS alone in the centre, the audio switches and
+      window controls right — on a grid whose side columns are
+      `minmax(max-content, 1fr)` (both designs; Modula used space-between until
+      November 2026 and its preset browser sat up to 100 px off the axis). The
+      two 1fr columns split what is left equally, so the centre column lands
+      on the WINDOW's axis whenever both sides fit; when one side cannot fit
+      its half, only that side grows and the centre gives way just as far as it
+      must — "nearly centred" rather than an overflow. The preset browser's
+      column is `minmax(120px, 180px)` and takes its room before the sides do.
+      DELTA and a plugin's own header buttons sit with ON/BYPASS (owner,
+      November 2026) so nothing else crowds the centre.
     -->
     <div
+      ref="headerEl"
       class="win-header grid items-center touch-none h-14 shrink-0 pl-5 pr-[14px]"
-      :class="[sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab', { 'is-narrow': narrowSheet }]"
+      :class="[sheet ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab', { 'is-narrow': narrowSheet, 'has-presets': hasPresets, 'has-center': hasCenter, 'is-balanced': headerSide != null && !narrowSheet }]"
+      :style="headerSide != null ? { '--win-side': headerSide + 'px' } : undefined"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
@@ -765,7 +810,7 @@ function requestClose() {
         right-hand group is genuinely uniform: the audio switches, a rule, and
         the one button that disposes of the window.
       -->
-      <div class="flex items-center gap-2.5">
+      <div ref="headLeftEl" class="win-left flex items-center gap-2.5">
         <!-- One word mark for both designs: the lead bold in off-white, the tail
              lighter, no rule. Every plugin's mark is the same colour (the
              per-plugin hue tint was dropped). A non-breaking space keeps a
@@ -773,6 +818,29 @@ function requestClose() {
         <span class="win-brand-m">
           {{ brandLead }}<template v-if="brandTail">{{ brandSep ? '\u00a0' : '' }}<span class="win-brand-m-tail">{{ brandTail }}</span></template>
         </span>
+        <!-- Chain membership: a chain glyph with the slot's number, by the name
+             because it says what THIS copy is (owner, November 2026: the
+             IN CHAIN · n pill crowded the preset browser). Amber while the
+             chain is live, dim while it is bypassed — the plugin's own lamp can
+             read ON while the chain around it is out of circuit and nothing is
+             heard. The words live in the tooltip and the label; a click opens
+             the rack. -->
+        <button
+          v-if="inChain"
+          type="button"
+          class="win-chain-badge"
+          :data-chain-slot="inChain.position"
+          :class="{ 'is-bypassed': inChain.chainBypassed }"
+          :title="inChain.chainBypassed
+            ? `In the Effect Chain, slot ${inChain.position} — the chain is bypassed. Open it to turn it on`
+            : `In the Effect Chain, slot ${inChain.position} — open the chain`"
+          :aria-label="`In the Effect Chain, slot ${inChain.position}${inChain.chainBypassed ? ', chain bypassed' : ''}. Open the Effect Chain`"
+          @pointerdown.stop
+          @click="openWindow('plugin-chain')"
+        >
+          <Icon name="chain" :size="12" :stroke-width="2.25" />
+          <span class="win-chain-num">{{ inChain.position }}</span>
+        </button>
         <span
           v-if="offline"
           class="win-offline"
@@ -800,35 +868,12 @@ function requestClose() {
       </div>
 
       <!--
-        The centre column: monitoring, presets, or both. DELTA sits here rather
-        than beside ON/BYPASS because the two are peers — one says whether the
-        effect is in circuit, the other which half of it you are listening to —
-        and a tray around the pair made them read as one switch with two
-        positions.
+        The centre column: the preset browser, and nothing else — the one thing
+        in the header that is the PATCH rather than a switch, centred on the
+        window. Classic faceplates put their own PresetMenu here through the
+        `header-center` slot.
       -->
-      <div class="flex items-center gap-2">
-        <!-- Modula: a lamp pill in the kit's second hue — DELTA is monitoring,
-             a mode rather than a value, the hue the kit gives modes. -->
-        <ModulaLedPill
-          v-if="showDelta && modula"
-          size="sm" label="DELTA" color="var(--m-second)"
-          :model-value="delta" :disabled="deltaDisabled" :title="deltaTitle"
-          @pointerdown.stop
-          @update:model-value="emit('toggle-delta')"
-        />
-        <button
-          v-if="showDelta && !modula"
-          type="button"
-          class="win-chip"
-          :class="{ 'win-chip--on': delta }"
-          :disabled="deltaDisabled"
-          :aria-pressed="String(delta)"
-          :title="deltaTitle"
-          @pointerdown.stop
-          @click="emit('toggle-delta')"
-        >
-          <span class="win-chip-text">DELTA</span>
-        </button>
+      <div class="win-center flex items-center justify-center min-w-0">
         <ModulaPresetBrowser
           v-if="modula && presets"
           class="win-presets-m"
@@ -836,21 +881,41 @@ function requestClose() {
           :disabled="presetsDisabled"
           :disabled-hint="presetsDisabledHint"
         />
-        <!-- Says BYPASSED with the chain: the plugin's own lamp can read ON
-             while the chain around it is out of circuit and nothing is heard. -->
-        <button
-          v-if="inChain"
-          type="button"
-          class="win-chain-pill is-member"
-          :class="{ 'is-bypassed': inChain.chainBypassed }"
-          :title="inChain.chainBypassed ? 'The Effect Chain is bypassed — open it to turn it on' : 'Open the Effect Chain'"
-          @pointerdown.stop
-          @click="openWindow('plugin-chain')"
-        >IN CHAIN · {{ inChain.position }}{{ inChain.chainBypassed ? ' · BYPASSED' : '' }}</button>
         <slot name="header-center" />
       </div>
 
-      <div class="flex items-center justify-end gap-2.5">
+      <div ref="headRightEl" class="win-right flex items-center justify-end gap-2.5">
+        <!--
+          Monitoring: a plugin's own header buttons (FREEZE, the faceplate
+          surface…) and DELTA, beside ON/BYPASS. DELTA and ON/BYPASS are peers —
+          one says whether the effect is in circuit, the other which half of it
+          you hear — and the gap between them keeps them reading as two
+          switches, not one with two positions.
+        -->
+        <div class="win-monitor flex items-center gap-2">
+          <slot name="header-controls" />
+          <ModulaLedPill
+            v-if="showDelta && modula"
+            size="sm" label="DELTA" color="var(--m-second)"
+            :model-value="delta" :disabled="deltaDisabled" :title="deltaTitle"
+            @pointerdown.stop
+            @update:model-value="emit('toggle-delta')"
+          />
+          <button
+            v-if="showDelta && !modula"
+            type="button"
+            class="win-chip"
+            :class="{ 'win-chip--on': delta }"
+            :disabled="deltaDisabled"
+            :aria-pressed="String(delta)"
+            :title="deltaTitle"
+            @pointerdown.stop
+            @click="emit('toggle-delta')"
+          >
+            <span class="win-chip-text">DELTA</span>
+          </button>
+        </div>
+        <div class="win-switches flex items-center gap-2.5">
         <!-- Modula: a fixed 96 px slot, so ON and BYPASS (different lengths)
              never move the close button. -->
         <span v-if="showEngage && modula" class="win-engage-slot-m">
@@ -895,6 +960,7 @@ function requestClose() {
           <span v-if="modula" style="font:400 17px/1 'Inter',system-ui,sans-serif;margin-top:-1px">×</span>
           <Icon v-else name="close" :size="14" :stroke-width="2.5" />
         </button>
+        </div>
       </div>
     </div>
 
@@ -1164,7 +1230,8 @@ function requestClose() {
 /* The header is the brightest plane in the window — the top of the chassis,
    catching the most light. One percent more hue than the shell with it. */
 .win-header {
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
+  column-gap: 16px;
   background: linear-gradient(180deg, var(--chrome-header-top), var(--chrome-header-bottom));
   border-bottom: 1px solid var(--chrome-hairline);
   box-shadow: 0 1px 0 var(--chrome-drop);
@@ -1189,27 +1256,49 @@ function requestClose() {
    One shape for both, because they are the same kind of control. Off is an
    outline, on is a raised white wash — a value step rather than a colour
    change, which is what keeps the hue out of the chrome. */
-.win-chain-pill {
-  height: 26px;
-  padding: 0 11px;
+.win-header.has-presets {
+  grid-template-columns: minmax(max-content, 1fr) minmax(120px, 180px) minmax(max-content, 1fr);
+}
+/* The sides hug their content, so the header can measure them (balanceHeader). */
+.win-left { justify-self: start; width: max-content; }
+.win-right { justify-self: end; width: max-content; }
+/* Balanced (see balanceHeader): both sides as wide as the wider one, so the
+   centre is exactly on the axis and the preset browser takes what is left. */
+.win-header.is-balanced {
+  grid-template-columns: minmax(var(--win-side), 1fr) auto minmax(var(--win-side), 1fr);
+}
+.win-header.has-presets.is-balanced {
+  grid-template-columns: minmax(var(--win-side), 1fr) minmax(120px, 180px) minmax(var(--win-side), 1fr);
+}
+
+/* Chain membership badge, beside the name: a chain glyph and the slot number
+   in the chain's amber; dim while the chain is bypassed. */
+.win-chain-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px 0 6px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, .14);
-  background: rgba(255, 255, 255, .04);
-  color: rgba(234, 246, 248, .7);
-  font: 700 9.5px/1 'JetBrains Mono', monospace;
-  letter-spacing: .12em;
+  border: 1px solid rgba(232, 163, 61, .45);
+  background: rgba(232, 163, 61, .06);
+  color: #e8a33d;
+  font: 700 10px/1 'JetBrains Mono', monospace;
   white-space: nowrap;
   cursor: pointer;
+  flex: none;
 }
-.win-chain-pill:hover { background: rgba(255, 255, 255, .09); color: #eaf6f8; }
-.win-chain-pill.is-member {
-  border-color: rgba(232, 163, 61, .45);
-  color: #e8a33d;
+.win-chain-badge:hover { background: rgba(232, 163, 61, .14); }
+.win-chain-badge:focus-visible { outline: 2px solid #7fe9f6; outline-offset: 2px; }
+.win-chain-badge.is-bypassed {
+  border-color: rgba(255, 255, 255, .16);
+  background: transparent;
+  color: rgba(234, 246, 248, .5);
 }
-.win-chain-pill.is-member.is-bypassed {
-  border-color: rgba(255, 255, 255, .14);
-  color: rgba(234, 246, 248, .55);
-}
+.win-chain-badge.is-bypassed .win-chain-num { text-decoration: line-through; }
+[data-surface='light'] .win-chain-badge { color: #a8660f; border-color: rgba(168, 102, 15, .5); }
+[data-surface='light'] .win-chain-badge.is-bypassed { color: rgba(29, 32, 38, .5); border-color: rgba(60, 50, 40, .25); }
+.win-monitor:empty { display: none; }
 .win-chip {
   display: flex;
   align-items: center;
@@ -1528,17 +1617,13 @@ function requestClose() {
   box-shadow: 0 60px 90px -50px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.6);
   color: var(--m-ink);
 }
-/* Space-between, as the kit draws it: the preset browser sits between the
-   name and the switches rather than on the window's axis. A centred column
-   needs twice the wider side's width, which a long name like CAMBRIDGE
-   INFLATOR turns into an overflow. */
+/* The same grid as the classic header (see the template): it used to be
+   space-between, on the worry that a centred column needs twice the wider
+   side's width — `minmax(max-content, 1fr)` side columns centre when they can
+   and give way only as far as they must, so CAMBRIDGE INFLATOR still fits. */
 [data-design='modula'] .win-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   height: 58px;
   padding: 2px 18px 0;
-  gap: 16px;
   background: transparent;
   border-bottom: 1px solid rgba(0, 0, 0, 0.32);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -1596,16 +1681,9 @@ function requestClose() {
   background: rgba(255, 255, 255, 0.06);
   color: var(--m-ink);
 }
-[data-design='modula'] .win-header > div {
-  min-width: 0;
-}
-[data-design='modula'] .win-header > div:first-child,
-[data-design='modula'] .win-header > div:last-child {
-  flex: none;
-}
 .win-presets-m {
-  width: 200px;
-  flex: 0 1 200px;
+  width: 100%;
+  min-width: 0;
 }
 [data-design='modula'] .win-rule--tall {
   height: 22px;
@@ -1761,23 +1839,58 @@ function requestClose() {
 .win-header.is-narrow > div:nth-of-type(1) > button {
   flex: none;
 }
-.win-header.is-narrow > div:nth-of-type(2) {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  justify-content: center;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 8px;
+/* Row 2: the presets on the left, DELTA and the plugin's own buttons on the
+   right — or whichever of them there is, centred across the whole row. The
+   right-hand group dissolves into the grid so its two halves can sit on
+   different rows. */
+.win-header.is-narrow .win-right {
+  display: contents;
 }
-.win-header.is-narrow > div:nth-of-type(2):empty {
-  display: none;
+.win-header.is-narrow .win-left {
+  width: auto;
 }
-.win-header.is-narrow > div:nth-of-type(3) {
+.win-header.is-narrow .win-switches {
   grid-column: 2;
   grid-row: 1;
+  justify-self: end;
+}
+.win-header.is-narrow .win-center {
+  grid-column: 1;
+  grid-row: 2;
+  justify-content: flex-start;
+  padding-bottom: 8px;
+}
+.win-header.is-narrow .win-monitor {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  padding-bottom: 8px;
+  /* It shares column 2 with ON and close: capped, so a wide group scrolls
+     sideways (the old row 2's last resort) instead of widening the column
+     and squeezing the name on row 1. */
+  min-width: 0;
+  max-width: 45vw;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* A scroll box clips: room for the pills' raised shadows, given back by
+     the margins so the layout does not move. */
+  padding: 4px 6px 8px;
+  margin: -4px -6px 0;
+}
+.win-header.is-narrow:not(.has-center) .win-center {
+  display: none;
+}
+.win-header.is-narrow:not(.has-center) .win-monitor {
+  grid-column: 1 / -1;
+  justify-self: center;
+  max-width: calc(100% + 12px);
+}
+.win-header.is-narrow:has(.win-monitor:empty) .win-center {
+  grid-column: 1 / -1;
+  justify-content: center;
 }
 .win-header.is-narrow .win-presets-m {
-  flex: 0 1 200px;
-  min-width: 150px;
+  width: 220px;
+  max-width: 100%;
 }
 </style>

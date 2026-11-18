@@ -311,7 +311,7 @@ async function applyAndClose() {
     @apply="applyAndClose"
     @close="close"
   >
-    <template #header-center>
+    <template #header-controls>
       <!-- An override is a thing you forget you turned on. The two references
            disagree by an order of magnitude about what Selectivity measures, so
            a panel running the non-shipping one and not saying so is a panel
