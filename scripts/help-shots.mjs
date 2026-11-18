@@ -94,7 +94,7 @@ const SHOT_SETTINGS = {
   // A lower threshold, so the Resonance view shows the voice being treated.
   'resonance-suppressor': { focus: { global: { selectivity: 13 } } },
   // The default (12 kHz, −8 dB) barely touches this vocal's top end.
-  'hf-limiter': { freq: 5000, threshold: -14 },
+  'hf-limiter': { freq: 5000, threshold: -20 },
 }
 
 /** How long audio runs through an open window before it is shot. */
@@ -192,7 +192,67 @@ async function selectTab(name) {
  */
 async function setPlaying(frame, on) {
   const button = frame.getByRole('button', { name: on ? 'Preview' : 'Stop', exact: true }).first()
-  if (await button.count() && await button.isEnabled()) { await button.click(); await page.waitForTimeout(300) }
+  if (await button.count() && await button.isEnabled()) { await button.click(); await page.waitForTimeout(300); return }
+  // A window with no Preview (the Spectrum Analyzer) listens to the editor's
+  // own transport: Space's event, toggled once to start and once to stop.
+  if (await frame.getByRole('button', { name: 'Preview', exact: true }).count()) return
+  // Its state is read off the time readout (advancing = playing), not assumed:
+  // a toggle after another window's Preview / Stop does not always start it.
+  for (let tries = 0; tries < 3 && (await transportPlaying()) !== on; tries++) {
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('wavely:toggle-play')))
+    await page.waitForTimeout(400)
+  }
+}
+async function transportPlaying() {
+  const clock = page.locator('button[aria-label="Loop playback"]')
+    .locator('xpath=ancestor::div[contains(@class,"grid-cols")][1]/div[1]')
+  const a = await clock.innerText().catch(() => '')
+  await page.waitForTimeout(250)
+  return a !== await clock.innerText().catch(() => '')
+}
+
+/**
+ * Windows whose display only reads well at a busy moment: a predicate on the
+ * open window, polled before each picture is taken so a live meter or curve is
+ * caught mid-action rather than in a pause between words.
+ */
+const BUSY = {
+  // The HF reduction readout (its first figure, dB): a deep cut bends the curve.
+  'hf-limiter': async frame => {
+    const t = await frame.locator('[data-help="meter"]').first().innerText().catch(() => '')
+    const m = t.match(/(\d+(?:\.\d+)?)\s*dB/)
+    return !!m && Number(m[1]) >= 8
+  },
+  // The display's peak readout ("1.2k Hz · D6 −29 · −49.5 dB"): voice, not a pause.
+  'spectrum-analyzer': async frame => {
+    const t = await frame.locator('[data-help="display"]').first().innerText().catch(() => '')
+    const m = t.replace(/\u2212/g, '-').match(/(-?\d+(?:\.\d+)?)\s*dB\s*$/m)
+    return !!m && Number(m[1]) >= -60
+  },
+}
+const BUSY_TIMEOUT_MS = 20000
+async function waitBusy(id, frame) {
+  if (!BUSY[id]) return
+  const until = Date.now() + BUSY_TIMEOUT_MS
+  while (Date.now() < until) {
+    if (await BUSY[id](frame)) return
+    await page.waitForTimeout(20)
+  }
+  console.log(`warn  ${id}: never busy within ${BUSY_TIMEOUT_MS / 1000} s`)
+}
+/**
+ * A screenshot taken at a busy moment, kept only if the window is STILL busy
+ * once it is taken: the HF Limiter's meter has no hold, and a cut read at the
+ * poll had often let go by the time the picture was captured. Retaken up to
+ * ten times, then kept as is.
+ */
+async function busyShot(id, frame, opts) {
+  for (let i = 0; i < 10; i++) {
+    await waitBusy(id, frame)
+    await page.screenshot(opts)
+    if (!BUSY[id] || await BUSY[id](frame)) return
+  }
+  console.log(`warn  ${id}: ${opts.path.split(/[\\/]/).pop()} taken after the moment passed`)
 }
 
 /**
@@ -367,7 +427,7 @@ try {
     const manifest = { panel: null, controls: {} }
 
     const box = await frame.boundingBox()
-    await page.screenshot({ path: join(outDir, 'panel.jpg'), clip: box, type: 'jpeg', quality: 88 })
+    await busyShot(id, frame, { path: join(outDir, 'panel.jpg'), clip: box, type: 'jpeg', quality: 88 })
     manifest.panel = {
       src: `/help/shots/${slug}/panel.jpg`, w: Math.round(box.width), h: Math.round(box.height),
       radius: await windowRadius(frame),
@@ -380,7 +440,7 @@ try {
     const faceEl = frame.locator('.win-face').first()
     const faceBox = (await faceEl.count()) ? await faceEl.boundingBox() : null
     if (faceBox) {
-      await page.screenshot({ path: join(outDir, 'face.jpg'), clip: faceBox, type: 'jpeg', quality: 90 })
+      await busyShot(id, frame, { path: join(outDir, 'face.jpg'), clip: faceBox, type: 'jpeg', quality: 90 })
       manifest.face = {
         src: `/help/shots/${slug}/face.jpg`,
         w: Math.round(faceBox.width), h: Math.round(faceBox.height),
@@ -406,7 +466,7 @@ try {
         x: Math.max(0, b.x - PAD), y: Math.max(0, b.y - PAD),
         width: b.width + 2 * PAD, height: b.height + 2 * PAD,
       }
-      await page.screenshot({ path: join(outDir, `${c.shot}.png`), clip })
+      await busyShot(id, frame, { path: join(outDir, `${c.shot}.png`), clip })
       manifest.controls[c.shot] = {
         src: `/help/shots/${slug}/${c.shot}.png`, w: Math.round(clip.width), h: Math.round(clip.height),
         // Where the control sits on panel.jpg, in its CSS pixels (unpadded):
