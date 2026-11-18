@@ -203,7 +203,7 @@ try {
     await addFromPicker('Inflator')
     await addFromPicker('Air Boost')
     const groupWindows = await frames()
-    const inflatorWin = page.locator('.win-frame').filter({ hasText: 'IN CHAIN · 1' })
+    const inflatorWin = page.locator('.win-frame').filter({ has: page.locator('.win-chain-badge[aria-label*="slot 1,"], .win-chain-badge[aria-label*="slot 1."]') })
     const memberApplyOff = await inflatorWin.locator('.win-apply').isDisabled().catch(() => false)
 
     // A plugin outside the chain bypasses it (it must preview what its own
@@ -225,11 +225,11 @@ try {
       && resumedBadge === 'ACTIVE'
 
     // A plugin that is ALSO in the chain still opens on its own: its solo copy,
-    // alone, with a live Apply and no IN CHAIN badge — the chain suspended
+    // alone, with a live Apply and no chain badge — the chain suspended
     // underneath and its slot untouched.
     await openOp('Inflator')
     const soloCopyAlone = (await frames()) === 1
-      && (await page.locator('.win-frame').filter({ hasText: 'IN CHAIN' }).count()) === 0
+      && (await page.locator('.win-frame .win-chain-badge').count()) === 0
       && !(await page.locator('.win-frame .win-apply').isDisabled())
       && (await chainBadge()) === 'BYPASSED'
     await page.keyboard.press('Escape'); await page.waitForTimeout(400)
