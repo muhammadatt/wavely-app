@@ -16,7 +16,8 @@ import {
 import { stopPlayback } from '../audio/playback.js'
 import { getDefaultOutputProfile, isOutputProfileLocked } from '../audio/presets.js'
 import { createAudioContext, onContextStopped, resumeIfStopped } from '../platform/audioSession.js'
-import { bufferBytes } from '../platform/memoryBudget.js'
+import { bufferBytes, memoryBudget } from '../platform/memoryBudget.js'
+import { historyTrim, segmentBufferIds, unreferencedBufferIds } from '../audio/historyBudget.js'
 
 const UNDO_STACK_CAP = 50
 
@@ -172,6 +173,9 @@ let activationSeq = 0
 // are what drive canUndo/canRedo.
 const docHistory = new Map()
 
+// Files already told that their undo history was trimmed (see noteHistoryTrim).
+const historyTrimNoticed = new Set()
+
 // Sticky preset choice. A narrator mastering 20 chapters wants one preset
 // across all of them, so a new document inherits the last explicit choice
 // rather than resetting to the global default.
@@ -238,15 +242,86 @@ function snapshot(doc, label, selection = doc.selection) {
   }
 }
 
-/** Push an undo entry for an edit about to happen to `doc`, and invalidate redo. */
+/**
+ * How much decoded audio ONE file's undo history may keep alive on its own
+ * (historyBudget.js): half this device's memory budget — 512 MiB on a phone
+ * with no reported memory, 2 GiB on a desktop. Reasoned, not measured.
+ */
+export const HISTORY_BUDGET_SHARE = 0.5
+let historyBudgetBytes = Math.floor(memoryBudget() * HISTORY_BUDGET_SHARE)
+
+/** Tests set a small budget; returns the previous one so they can put it back. */
+export function setHistoryBudgetBytes(bytes) {
+  const prev = historyBudgetBytes
+  historyBudgetBytes = bytes
+  return prev
+}
+
+/** Buffers in use outside history: every open file's timeline, and the clipboard. */
+function liveBufferIds() {
+  const ids = new Set()
+  for (const d of appState.documents) segmentBufferIds(d.segments, ids)
+  segmentBufferIds(appState.clipboard, ids)
+  return ids
+}
+
+/**
+ * Drop pool buffers nothing reaches any more — no timeline, no history step of
+ * any file, not the clipboard — so the browser can reclaim them. Until this
+ * existed a buffer left the pool only when its file closed, so every apply's
+ * output stayed in memory after undo had long forgotten it.
+ */
+function releaseUnreferencedBuffers() {
+  const lists = [appState.clipboard ?? []]
+  for (const d of appState.documents) lists.push(d.segments)
+  for (const h of docHistory.values()) {
+    for (const e of h.undo) lists.push(e.segments)
+    for (const e of h.redo) lists.push(e.segments)
+  }
+  for (const id of unreferencedBufferIds([...bufferPool.keys()], lists)) {
+    poolDelete(id)
+    peakCaches.delete(id)
+    for (const owned of docBuffers.values()) owned.delete(id)
+  }
+}
+
+/**
+ * Push an undo entry for an edit about to happen to `doc`, and invalidate redo.
+ * History is then trimmed from the oldest step to its byte budget (the newest
+ * step always stays) and to UNDO_STACK_CAP steps. Returns how many steps the
+ * byte budget dropped, so the caller can say so.
+ */
 function recordUndo(doc, label, selection = doc.selection) {
   const h = historyFor(doc.id)
   h.undo.push(snapshot(doc, label, selection))
   if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
   h.redo.length = 0
+  const drop = enforceHistoryBudget(doc)
   doc.revision = ++revisionSeq
-  doc.undoCount = h.undo.length
   doc.redoCount = 0
+  return drop
+}
+
+/**
+ * Trim `doc`'s undo history to its byte budget and release what that frees.
+ * Run when a step is recorded AND again once an apply has committed: before
+ * the commit, the buffer being replaced is still on the timeline and counts as
+ * live, so a check at record time alone lets history run one step over.
+ * Returns how many steps were dropped.
+ */
+function enforceHistoryBudget(doc) {
+  const h = historyFor(doc.id)
+  const { drop } = historyTrim({
+    undo: h.undo,
+    redo: h.redo,
+    liveIds: liveBufferIds(),
+    bytesOf: id => bufferBytes(bufferPool.get(id)),
+    budgetBytes: historyBudgetBytes,
+  })
+  if (drop > 0) h.undo.splice(0, drop)
+  releaseUnreferencedBuffers()
+  doc.undoCount = h.undo.length
+  return drop
 }
 
 
@@ -344,7 +419,17 @@ export function useEditorState() {
   function pushUndo(label = '') {
     const doc = activeDocument.value
     if (!doc) return
-    recordUndo(doc, label)
+    noteHistoryTrim(doc, recordUndo(doc, label))
+  }
+
+  /**
+   * Say once per file that older undo steps were let go to save memory —
+   * otherwise Undo just stops earlier than the user expects, with no reason.
+   */
+  function noteHistoryTrim(doc, dropped) {
+    if (!(dropped > 0) || historyTrimNoticed.has(doc.id)) return
+    historyTrimNoticed.add(doc.id)
+    showToast('Older undo steps were cleared to free memory. Recent steps can still be undone.', 8000)
   }
 
   /**
@@ -574,6 +659,7 @@ export function useEditorState() {
     }
     docBuffers.delete(docId)
     docHistory.delete(docId)
+    historyTrimNoticed.delete(docId)
     docSaveTargets.delete(docId)
     docSaveSettings.delete(docId)
     docSourceHandles.delete(docId)
@@ -759,11 +845,14 @@ export function useEditorState() {
     // the commit can land seconds later, and the waveform stays usable
     // meanwhile, so the live selection may be something else by now. Passing
     // null says "nothing was selected"; omitting it falls back to the live one.
-    recordUndo(doc, label, selection === undefined ? doc.selection : selection)
+    let dropped = recordUndo(doc, label, selection === undefined ? doc.selection : selection)
 
     const bufferId = uuidv4()
     addBuffer(bufferId, newBuffer, doc.id)
     doc.segments = replaceRegionWithBuffer(doc.segments, start, end, newBuffer, bufferId)
+    // Again now the replaced audio has left the timeline (see enforceHistoryBudget).
+    dropped += enforceHistoryBudget(doc)
+    noteHistoryTrim(doc, dropped)
     return bufferId
   }
 
