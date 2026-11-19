@@ -19,11 +19,12 @@ import { baseId, copyOfId } from './pluginCopies.js'
  * does want the same settings on every chapter: open the next file and it is
  * already set up. From then on the file has its own copy.
  *
- * ⚠ HAND-SET FILE VALUES TRAVEL TOO (`fileIo` in pluginSettings.js — the
- * compressors' manual INPUT trim). Presets and saved chains leave them out
- * because they describe a recording, which is exactly why they belong in that
- * recording's per-file settings (owner: a manual pre-gain is a setting like
- * any other). Under AUTO the trim is a measurement and re-measures per file.
+ * ⚠ HAND-SET FILE VALUES ARE KEPT PER FILE TOO (`fileIo` in pluginSettings.js
+ * — the compressors' manual INPUT trim). Presets and saved chains leave them
+ * out because they describe a recording, which is exactly why they belong in
+ * that recording's per-file settings (owner: a manual pre-gain is a setting
+ * like any other). But they are NOT inherited: a file with nothing saved starts
+ * the trim on AUTO, which re-measures it (owner, November 2026).
  *
  * WHY SAVE AND RESTORE RATHER THAN LIVE INSTANCES PER FILE. Only the active
  * file plays, so one live node per plugin copy is enough. A copy per file
@@ -105,17 +106,19 @@ export function savePluginSettingsFor(docId) {
 }
 
 /**
- * Entering a file with nothing saved: everything stays as it is (inherited),
- * except that hand-set file values are written again so they are bound to the
- * new file — otherwise the compressors would hand a manual trim back to AUTO,
- * their rule for a trim met on a different document.
+ * Entering a file with nothing saved: settings and chain stay as they are
+ * (inherited), but hand-set FILE values go back to AUTO (owner, November 2026:
+ * a new file starts the INPUT trim on AUTO, everything else inherited). The
+ * trim describes the recording it was dialled on; AUTO re-measures this one.
  */
+const AUTO_FILE_SETTINGS = { inputAuto: true }
+
 function inheritInto() {
   for (const pluginId of builtSoloCopies()) {
-    if (PLUGIN_SETTINGS[pluginId].fileIo) writeCopy(pluginId, 'solo', { settings: null, file: readCopy(pluginId, 'solo').file })
+    if (PLUGIN_SETTINGS[pluginId].fileIo) writeCopy(pluginId, 'solo', { settings: null, file: AUTO_FILE_SETTINGS })
   }
   for (const s of rackSlots()) {
-    if (PLUGIN_SETTINGS[s.plugin].fileIo) writeCopy(s.plugin, s.copy, { settings: null, file: readCopy(s.plugin, s.copy).file })
+    if (PLUGIN_SETTINGS[s.plugin].fileIo) writeCopy(s.plugin, s.copy, { settings: null, file: AUTO_FILE_SETTINGS })
   }
 }
 

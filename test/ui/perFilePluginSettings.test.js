@@ -81,14 +81,16 @@ test('the installed watcher follows the editor\'s active document', () => {
   appState.activeDocumentId = null
 })
 
-test('a manual INPUT trim belongs to its file, and a new file inherits it', () => {
+test('a manual INPUT trim belongs to its file; a new file starts it on AUTO', () => {
   per.resetPerFilePluginSettings()
   const la2a = useLA2A('solo')
   const trim = () => (la2a.la2aInputAuto.value ? 'AUTO' : la2a.la2aInputDb.value)
+  la2a.syncPeakReduction(63)
   la2a.syncInput(6)                                    // dialled by hand on A
   per.onActiveDocumentChanged('B', 'A', ['A', 'B'])
-  assert.equal(trim(), 6, 'B has nothing saved: it inherits the manual trim')
-  la2a.syncInput(-4)                                   // re-dialled on B
+  assert.equal(trim(), 'AUTO', 'B has nothing saved: the trim starts on AUTO')
+  assert.equal(la2a.la2aPeakReduction.value, 63, '…while the other settings are inherited')
+  la2a.syncInput(-4)                                   // dialled on B
   per.onActiveDocumentChanged('A', 'B', ['A', 'B'])
   assert.equal(trim(), 6, 'A keeps its own')
   la2a.resetInputAuto()                                // A handed back to AUTO
