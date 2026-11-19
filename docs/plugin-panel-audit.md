@@ -2,7 +2,7 @@
 
 November 2026. This is step 1 of the plugin refactor (#1: panels become views; #2: per-file plugin state; #3: plugins open mid-playback).
 It covers all 51 `.vue` files under `src/components/panels/`, including sub-panels, the rail panels and FloatingWindow's non-chrome logic.
-Line numbers are as of commit `HEAD` at the time of writing. Every file was read in full; nothing was changed while auditing.
+Line numbers are as of commit `0d362d5`, the base this audit was written against; steps 1–4 have since moved many of them. Every file was read in full; nothing was changed while auditing.
 
 Verdicts:
 - **THIN**: only the shared boilerplate below needs to move.

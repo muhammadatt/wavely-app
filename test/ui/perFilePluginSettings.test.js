@@ -109,3 +109,28 @@ test('presets and saved chains still never carry the trim', async () => {
   assert.ok(!('inputDb' in (chainSettingsOf('opto-smooth', read) ?? {})))
   la2a.resetInputAuto()
 })
+
+test('a switch during a chain Apply never saves the Apply\'s rack as another file\'s', () => {
+  const live = { bypassed: false, slots: [{ plugin: 'inflator' }] }   // file A's rack, frozen by its Apply
+  const previous = { bypassed: false, slots: [{ plugin: 'air-band' }] } // what B had saved
+  assert.equal(per.chainToSave({ docId: 'A', owner: 'A', live, previous: null }), live, 'the owner saves the live rack')
+  assert.equal(per.chainToSave({ docId: 'B', owner: 'A', live, previous }), previous, 'B keeps its own chain')
+  assert.equal(per.chainToSave({ docId: 'C', owner: 'A', live, previous: undefined }), live, 'nothing saved yet: inherited')
+  assert.equal(per.chainToSave({ docId: 'B', owner: null, live, previous }), live, 'no owner yet: the live rack')
+})
+
+test('a file closed while another is active is forgotten without a tab switch', async () => {
+  const { nextTick } = await import('vue')
+  per.resetPerFilePluginSettings()
+  const { appState } = useEditorState()
+  per.installPerFilePluginSettings()
+  appState.documents.push({ id: 'keep' }, { id: 'gone' })
+  per.savePluginSettingsFor('keep')
+  per.savePluginSettingsFor('gone')
+  assert.deepEqual(per.savedDocumentIds().sort(), ['gone', 'keep'])
+  appState.documents.splice(appState.documents.findIndex(d => d.id === 'gone'), 1)
+  await nextTick()
+  assert.deepEqual(per.savedDocumentIds(), ['keep'])
+  appState.documents.splice(0)
+  await nextTick()
+})

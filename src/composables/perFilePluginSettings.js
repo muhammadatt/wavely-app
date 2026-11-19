@@ -93,15 +93,35 @@ function rackSlots() {
     .map(s => ({ ...s, plugin: baseId(s.windowId), copy: copyOfId(s.windowId) }))
 }
 
+/**
+ * Which file the LIVE rack belongs to — normally the active one. While a
+ * chain restore is pending (a switch during a chain Apply, which freezes the
+ * rack) it is still the file the Apply started on, so the rack on screen is
+ * NOT the active file's and must not be saved as it.
+ */
+let rackOwner = null
+
+/**
+ * The chain to remember for `docId`: the live rack when it is `docId`'s own,
+ * else what was saved for it before — a switch away and back during a chain
+ * Apply would otherwise save the Apply's file's rack as this one's, and lose
+ * this file's chain for good.
+ */
+export function chainToSave({ docId, owner, live, previous }) {
+  if (owner == null || owner === docId) return live
+  return previous ?? live
+}
+
 /** Remember every solo plugin's settings and the whole chain as `docId`'s. */
 export function savePluginSettingsFor(docId) {
   if (docId == null) return
   const solo = new Map()
   for (const pluginId of builtSoloCopies()) solo.set(pluginId, readCopy(pluginId, 'solo'))
-  const chain = {
+  const live = {
     bypassed: usePluginChain().bypassed.value,
     slots: rackSlots().map(s => ({ plugin: s.plugin, active: s.active, ...readCopy(s.plugin, s.copy) })),
   }
+  const chain = chainToSave({ docId, owner: rackOwner, live, previous: saved.get(docId)?.chain })
   saved.set(docId, { solo, chain })
 }
 
@@ -156,15 +176,26 @@ let chainRestorePending = false
 export function restorePluginSettingsFor(docId) {
   const store = saved.get(docId)
   if (!store) {
+    // The live rack, whoever's it was, becomes this file's (inherited).
     inheritInto()
+    rackOwner = docId
+    chainRestorePending = false
     return
   }
   for (const pluginId of builtSoloCopies()) {
     const hit = store.solo.get(pluginId)
     if (hit) writeCopy(pluginId, 'solo', hit)
   }
-  if (chainApplying.value) chainRestorePending = true
-  else restoreChain(store.chain)
+  if (docId === rackOwner) {
+    // Back on the file whose rack is live (a switch away and back during a
+    // chain Apply): nothing to put back.
+    chainRestorePending = false
+  } else if (chainApplying.value) {
+    chainRestorePending = true
+  } else {
+    restoreChain(store.chain)
+    rackOwner = docId
+  }
 }
 
 /** Drop what is saved for files that are no longer open. */
@@ -173,10 +204,16 @@ export function forgetClosedDocuments(openIds) {
   for (const id of saved.keys()) if (!open.has(id)) saved.delete(id)
 }
 
+/** The files that have settings saved (for tests). */
+export function savedDocumentIds() {
+  return [...saved.keys()]
+}
+
 /** For tests. */
 export function resetPerFilePluginSettings() {
   saved.clear()
   chainRestorePending = false
+  rackOwner = null
 }
 
 /**
@@ -211,6 +248,12 @@ export function installPerFilePluginSettings() {
       chainRestorePending = false
       const store = saved.get(appState.activeDocumentId)
       if (store) restoreChain(store.chain)
+      rackOwner = appState.activeDocumentId
+    })
+    // A file closed while another is active never passes through a switch:
+    // drop what was saved for it when it leaves the list.
+    watch(() => appState.documents.map(d => d.id).join('\n'), () => {
+      forgetClosedDocuments(appState.documents.map(d => d.id))
     })
   })
 }
