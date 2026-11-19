@@ -764,11 +764,14 @@ test('Peaks guide: target takes the gap off the peaks, touch first lowers the vo
   const plain = S.measureVoxPressor([x], SR, kpAt(3))
   assert.equal(S.measureVoxPressorGuides([x], SR, kpAt(3)).peaksGuide, undefined)
   for (const k of VOX_MEASURED_KEYS) assert.deepEqual(plain[k], r[k], k)
-  // A cold search from another knob lands within a tenth of a step.
+  // A cold search from another knob lands within the search's own tolerance:
+  // each answer is within PEAKS_GUIDE_TOL_DB (0.1 dB) of the gap, ~0.1 of a
+  // knob step at ~0.9 dB off the peaks per dB of drive and 1.13 dB per step,
+  // so two searches from different seeds can sit up to ~0.2 apart.
   S.clearVoxPressorMeasureCache()
   // Cold: the guides measure the Peaks → Body half themselves when no measurement came first.
   const cold = P.peaksGuideKnobs(S.measureVoxPressorGuides([x], SR, { ...kpAt(9), peaksGuideRangeDb: P.peaksGuideRangeDb() }).peaksGuide)
-  assert.ok(Math.abs(cold.target - g.target) < 0.15, `${cold.target} vs ${g.target}`)
+  assert.ok(Math.abs(cold.target - g.target) < 0.25, `${cold.target} vs ${g.target}`)
 })
 
 test('Guide search: a goal that starts flat is still reached within the budget', async () => {
@@ -1013,4 +1016,59 @@ test('Voice profile passed or measured: the same cache keys (a handed-back profi
   S.clearVoxPressorMeasureCache()
   const cold = S.measureVoxPressor([x], SR, { ...kp, cornerHz: m.cornerHz, voiceF0Hz: m.voiceF0Hz })
   for (const k of VOX_MEASURED_KEYS) assert.deepEqual(cold[k], m[k], k)
+})
+
+test('Guide search: a good secant is not overridden by the step doubling (linear mode)', async () => {
+  const S = await import('../../src/audio/voxPressorSolve.js')
+  // The Body guide's shape: ~0.25 dB of average leveling per point of PR.
+  const f = d => 0.25 * (d - 44)
+  const points = [{ driveDb: 60, v: f(60) }, { driveDb: 64, v: f(64) }]
+  const tried = []
+  const at = d => { tried.push(d); points.push({ driveDb: d, v: f(d) }) }
+  const d = S.findDrive(at, points, q => q.v, 6, 0.1, 38, 78, () => 6 - tried.length)
+  // Secant says 68; "at least double the spacing" sent it to 72 first.
+  assert.ok(Math.abs(tried[0] - 68) < 1e-9, `first render ${tried[0]}`)
+  assert.equal(tried.length, 1)
+  assert.ok(Math.abs(f(d) - 6) <= 0.1)
+})
+
+test('Guide search: with every point past the goal it steps down, not to the bottom of the range', async () => {
+  const S = await import('../../src/audio/voxPressorSolve.js')
+  const f = d => 0.25 * (d - 44)
+  // One point: halfway towards the bottom, not the bottom.
+  const one = [{ driveDb: 61.2, v: f(61.2) }]
+  const tried1 = []
+  const d1 = S.findDrive(x => { tried1.push(x); one.push({ driveDb: x, v: f(x) }) }, one, q => q.v, 4, 0.1, 38, 78, () => 6 - tried1.length)
+  assert.ok(tried1[0] > 38 + 1e-9, `went to the bottom: ${tried1[0]}`)
+  assert.ok(Math.abs(f(d1) - 4) <= 0.1)
+  // Two points: along their secant, straight onto the answer.
+  const two = [{ driveDb: 61.2, v: f(61.2) }, { driveDb: 65, v: f(65) }]
+  const tried2 = []
+  S.findDrive(x => { tried2.push(x); two.push({ driveDb: x, v: f(x) }) }, two, q => q.v, 4, 0.1, 38, 78, () => 6 - tried2.length)
+  assert.equal(tried2.length, 1)
+  assert.ok(Math.abs(tried2[0] - 60) < 1e-9, `secant step ${tried2[0]}`)
+})
+
+test('Measurement caches are kept per owner: another copy measuring in between evicts nothing', async () => {
+  const S = await import('../../src/audio/voxPressorSolve.js')
+  const P = await import('../../src/audio/effects/voxPressorParams.js')
+  const a = narration(SR, { seconds: 8, levelDb: -22 })
+  const b = narration(SR, { seconds: 8, levelDb: -16 })
+  const kpFor = (x, owner) => ({
+    ...toKernelParams({ ...VOX_DEFAULTS, peaks: 3, body: 4.8, deEss: 0, parallel: 0, density: 0, alignDb: inputAlignDbFor([x], SR) }),
+    owner, peaksGuideRangeDb: P.peaksGuideRangeDb(), bodyGuidePrRange: P.bodyGuidePrRange(),
+  })
+  S.clearVoxPressorMeasureCache()
+  S.measureVoxPressor([a], SR, kpFor(a, 'A'))
+  const gA = S.measureVoxPressorGuides([a], SR, kpFor(a, 'A'))
+  S.measureVoxPressor([b], SR, kpFor(b, 'B'))
+  S.measureVoxPressorGuides([b], SR, kpFor(b, 'B'))
+  const gA2 = S.measureVoxPressorGuides([a], SR, kpFor(a, 'A'))
+  assert.equal(gA2.peaksGuide, gA.peaksGuide)
+  assert.equal(gA2.bodyGuide, gA.bodyGuide)
+  // The owner never changes an answer: the same request without one is identical.
+  S.clearVoxPressorMeasureCache()
+  const plain = S.measureVoxPressorGuides([a], SR, { ...kpFor(a, 'A'), owner: undefined })
+  assert.deepEqual(plain.peaksGuide, gA.peaksGuide)
+  assert.deepEqual(plain.bodyGuide, gA.bodyGuide)
 })

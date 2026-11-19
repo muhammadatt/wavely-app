@@ -140,6 +140,32 @@ export function voiceProfileSpans(start, end, totalS = VOICE_PROFILE_SAMPLE_S, b
   })
 }
 
+/** Concatenate per-channel parts (`[part][channel]`) into one Float32Array per channel. */
+export function concatChannelParts(parts, channels = parts[0]?.length ?? 1) {
+  const len = parts.reduce((n, p) => n + (p[0]?.length ?? 0), 0)
+  return Array.from({ length: channels }, (_, c) => {
+    const out = new Float32Array(len)
+    let at = 0
+    for (const p of parts) { out.set(p[c], at); at += p[c].length }
+    return out
+  })
+}
+
+/**
+ * The voice-profile excerpt (`voiceProfileSpans`) cut from whole decoded
+ * channels: what the panel measures, for callers that hold the audio itself
+ * (the marketing renderer).
+ */
+export function voiceProfileExcerpt(channels, sampleRate) {
+  const n = channels[0]?.length ?? 0
+  const parts = voiceProfileSpans(0, n / sampleRate).map(w => {
+    const from = Math.round(w.start * sampleRate)
+    const to = Math.min(n, Math.round(w.end * sampleRate))
+    return channels.map(ch => ch.subarray(from, to))
+  })
+  return concatChannelParts(parts, channels.length)
+}
+
 /**
  * The peak sample magnitude of a region, in dBFS, WITHOUT rendering it.
  *

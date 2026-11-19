@@ -1,7 +1,7 @@
 import { getSegmentDuration } from './operations.js'
 import { applyGainSegments } from './dsp/autoLevel.js'
 import { playedSampleCount } from './dsp/fade.js'
-import { analysisWindow, analysedWholeRegion, regionPeakDb, voiceProfileSpans } from './analysisWindow.js'
+import { analysisWindow, analysedWholeRegion, regionPeakDb, voiceProfileSpans, concatChannelParts } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
 // ⚠ From the PROCESSOR, not the effect wrapper — the wrapper pulls the worklet
@@ -780,14 +780,7 @@ export function computeVoiceProfile(segments, start, end, sampleRate, channels) 
  */
 export function computeVoiceProfileSampled(segments, start, end, sampleRate, channels) {
   const parts = voiceProfileSpans(start, end).map(w => renderRegionToBuffer(segments, w.start, w.end, sampleRate, channels))
-  const nCh = parts[0]?.length ?? channels
-  const len = parts.reduce((n, p) => n + p[0].length, 0)
-  const channelData = Array.from({ length: nCh }, (_, c) => {
-    const out = new Float32Array(len)
-    let at = 0
-    for (const p of parts) { out.set(p[c], at); at += p[c].length }
-    return out
-  })
+  const channelData = concatChannelParts(parts, parts[0]?.length ?? channels)
   return new Promise((resolve, reject) => {
     const id = ++measureSeq
     measurePending.set(id, { resolve, reject })

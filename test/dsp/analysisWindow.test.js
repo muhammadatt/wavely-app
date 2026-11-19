@@ -171,3 +171,35 @@ test('voiceProfileSpans: the whole span when short; otherwise equal blocks sprea
   assert.ok(Math.abs(total - VOICE_PROFILE_SAMPLE_S) < 1e-9, `total ${total}`)
   for (let i = 1; i < spans.length; i++) assert.ok(spans[i].start >= spans[i - 1].end, 'blocks overlap')
 })
+
+test('concatChannelParts joins parts per channel in order', async () => {
+  const { concatChannelParts } = await import('../../src/audio/analysisWindow.js')
+  const parts = [
+    [Float32Array.of(1, 2), Float32Array.of(-1, -2)],
+    [Float32Array.of(3), Float32Array.of(-3)],
+  ]
+  const out = concatChannelParts(parts)
+  assert.equal(out.length, 2)
+  assert.deepEqual([...out[0]], [1, 2, 3])
+  assert.deepEqual([...out[1]], [-1, -2, -3])
+  assert.deepEqual(concatChannelParts([], 2).map(c => c.length), [0, 0])
+})
+
+test('voiceProfileExcerpt cuts the spans from whole channels', async () => {
+  const { voiceProfileExcerpt, voiceProfileSpans, VOICE_PROFILE_SAMPLE_S } = await import('../../src/audio/analysisWindow.js')
+  const sr = 100
+  const n = 120 * sr
+  const ramp = Float32Array.from({ length: n }, (_, i) => i)
+  const out = voiceProfileExcerpt([ramp, ramp], sr)
+  assert.equal(out.length, 2)
+  assert.equal(out[0].length, VOICE_PROFILE_SAMPLE_S * sr)
+  // Each block starts where its span does.
+  const spans = voiceProfileSpans(0, 120)
+  let at = 0
+  for (const w of spans) {
+    assert.equal(out[0][at], Math.round(w.start * sr))
+    at += Math.round(w.end * sr) - Math.round(w.start * sr)
+  }
+  // Shorter than the excerpt: the whole thing.
+  assert.equal(voiceProfileExcerpt([ramp.subarray(0, 5 * sr)], sr)[0].length, 5 * sr)
+})

@@ -9,6 +9,7 @@ import {
   computeVoiceProfileSampled,
 } from '../audio/processing.js'
 import { analysedWholeRegion, regionAlignDb } from '../audio/analysisWindow.js'
+import { createVoiceProfileCache } from '../audio/voiceProfileCache.js'
 import { getSegmentDuration } from '../audio/operations.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import {
@@ -139,8 +140,13 @@ const copies = pluginCopies((copy, life) => {
    * measured per SELECTION, inside the measurement (~1 s of a ~4 s cold one on
    * 30 s of narration), so every new selection paid for them again.
    */
-  let profileFor = null
-  let profilePromise = null
+  const voiceProfiles = createVoiceProfileCache()
+  /**
+   * The newest guide request (`solveGuides`). A guide is kept unless a NEWER
+   * guide request exists or the preview region moved — never dropped merely
+   * because a measurement started since, which during a drag was always.
+   */
+  let guideSeq = 0
   /** The region the last full measurement was of (the two-pass rule in `solve`). */
   let measuredRegion = null
   /** The Parallel compressor the last measured `parallelMakeupDb` belongs to (its warm start). */
@@ -188,6 +194,7 @@ const copies = pluginCopies((copy, life) => {
   life.onDispose(() => {
     solveThrottle?.cancel()
     solveSeq++
+    guideSeq++
   })
 
   let following = false
@@ -298,23 +305,23 @@ const copies = pluginCopies((copy, life) => {
     function ensureVoiceProfile(segments) {
       const key = timelineKey(segments)
       const own = segments === state.segments
-      if (own && profileFor === key && profilePromise) return profilePromise
-      const end = timelineEnd(segments)
-      const promise = end > 0
-        ? computeVoiceProfileSampled(segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels)
-        : Promise.resolve({ cornerHz: null, voiceF0Hz: null })
-      if (!own) return promise
-      profileFor = key
-      profilePromise = promise
-      promise.then(prof => {
-        // Into the live params at once, ahead of the measurement that uses it.
-        if (profilePromise !== promise || timelineKey(state.segments) !== key) return
-        voxMeasured.value = { ...voxMeasured.value, ...prof }
-        pushParam('cornerHz', prof.cornerHz)
-        pushParam('voiceF0Hz', prof.voiceF0Hz)
-      }, () => {
-        if (profilePromise === promise) { profileFor = null; profilePromise = null }
-      })
+      const { sampleRate, channels } = state.currentFile
+      const measure = () => {
+        const end = timelineEnd(segments)
+        return end > 0
+          ? computeVoiceProfileSampled(segments, 0, end, sampleRate, channels)
+          : { cornerHz: null, voiceF0Hz: null }
+      }
+      const promise = voiceProfiles.get(key, measure, own)
+      if (own) {
+        promise.then(prof => {
+          // Into the live params at once, ahead of the measurement that uses it.
+          if (!voiceProfiles.holds(promise) || timelineKey(state.segments) !== key) return
+          voxMeasured.value = { ...voxMeasured.value, ...prof }
+          pushParam('cornerHz', prof.cornerHz)
+          pushParam('voiceF0Hz', prof.voiceF0Hz)
+        }, () => {})
+      }
       return promise
     }
 
@@ -343,7 +350,9 @@ const copies = pluginCopies((copy, life) => {
       try {
         const profile = await ensureVoiceProfile(segments)
         if (seq !== solveSeq) return null
-        const kp = { ...toKernelParams(currentParams()), cornerHz: profile.cornerHz, voiceF0Hz: profile.voiceF0Hz }
+        // `owner`: the solver keeps one cache set per copy, so two VoxPressor
+        // copies measuring in turn never evict each other's entries.
+        const kp = { ...toKernelParams(currentParams()), cornerHz: profile.cornerHz, voiceF0Hz: profile.voiceF0Hz, owner: windowId }
         // The LA-2A stage's makeup solve starts from the last answer, so a
         // knob move usually converges in one render.
         if (Number.isFinite(voxMeasured.value.bodyMakeupDb)) kp.bodyMakeupGuess = voxMeasured.value.bodyMakeupDb
@@ -405,7 +414,7 @@ const copies = pluginCopies((copy, life) => {
         solvedFor = key
         // The rings after the readouts: their own worker call, so a new
         // region's figures are not held back by the guides' searches.
-        if (guide) solveGuides(segments, start, end, kp, seq)
+        if (guide) solveGuides(segments, start, end, kp)
         return next
       } finally {
         if (seq === solveSeq) voxBusy.value = false
@@ -414,12 +423,20 @@ const copies = pluginCopies((copy, life) => {
 
     /**
      * The Peaks and Body rings (`measureVoxPressorGuides`), asked right after
-     * the measurement `seq` with the same params, so the worker reuses its
-     * Peaks → Body render. Dropped if another measurement has started since:
-     * that one asks for its own. Not awaited by `solve`, so it never holds
-     * `voxBusy` (the readouts' "measuring…").
+     * a measurement with the same params, so the worker reuses its Peaks →
+     * Body render. Not awaited by `solve`, so it never holds `voxBusy` (the
+     * readouts' "measuring…").
+     *
+     * ⚠ KEPT UNLESS A NEWER GUIDE REQUEST EXISTS OR THE REGION MOVED. It was
+     * dropped whenever a measurement had started since — and `solve` returns
+     * before its guides land, so the throttle's next measurement always had:
+     * during a drag the rings never moved and every guide solve was thrown
+     * away. A guide for the knobs of a moment ago is still the latest answer
+     * there is (the Peaks guide does not depend on the Peaks knob at all).
      */
-    async function solveGuides(segments, start, end, kp, seq) {
+    async function solveGuides(segments, start, end, kp) {
+      const gs = ++guideSeq
+      const region = `${timelineKey(segments)}|${start}|${end}`
       let g
       try {
         g = await computeVoxPressorGuides(
@@ -428,7 +445,8 @@ const copies = pluginCopies((copy, life) => {
       } catch {
         return // a guide is advice: the rings keep their last colours
       }
-      if (seq !== solveSeq) return
+      const now = previewRegion()
+      if (gs !== guideSeq || !now || `${timelineKey(state.segments)}|${now.start}|${now.end}` !== region) return
       voxPeaksGuide.value = peaksGuideKnobs(g.peaksGuide)
       voxBodyGuide.value = bodyGuideKnobs(g.bodyGuide)
       followGuide()
