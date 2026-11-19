@@ -233,7 +233,7 @@ export function peaksGapDb(channels, sampleRate) {
  * from the points `at` has rendered and as few more as it takes. Returns lo
  * when even lo is past it, null when hi falls short.
  */
-function findDrive(at, points, f, goal, tol, lo, hi, budget) {
+export function findDrive(at, points, f, goal, tol, lo, hi, budget) {
   for (;;) {
     let a = null
     let b = null
@@ -256,10 +256,16 @@ function findDrive(at, points, f, goal, tol, lo, hi, budget) {
       if (b.d - a.d < 0.05) return d
     } else if (a) {
       // All short: step up along the slope of the two highest points (at
-      // least 0.3 dB per dB, so a flat stretch still moves), or to the top.
+      // least 0.3 dB per dB, so a flat stretch still moves), or to the top —
+      // and at least DOUBLE the last spacing. ⚠ Without the doubling a goal
+      // that starts flat (the voice-touched figure grows ~0.003 dB per dB at
+      // the bottom of a quiet voice's travel) crawled 0.17 dB a render, spent
+      // the whole budget a quarter of the way up and read "not reached", so
+      // the ring painted all green.
       const up = points.filter(q => q.driveDb <= a.d).sort((x, y) => y.driveDb - x.driveDb)
       const slope = up.length > 1 ? (f(up[0]) - f(up[1])) / (up[0].driveDb - up[1].driveDb) : 0
-      d = Math.min(hi, a.d + (-a.v) / Math.max(0.3, slope))
+      const spacing = up.length > 1 ? up[0].driveDb - up[1].driveDb : 0
+      d = Math.min(hi, a.d + Math.max((-a.v) / Math.max(0.3, slope), 2 * spacing))
     } else if (b) {
       d = lo
     } else {

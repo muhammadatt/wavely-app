@@ -767,6 +767,23 @@ test('Peaks guide: target takes the gap off the peaks, touch first lowers the vo
   assert.ok(Math.abs(cold.target - g.target) < 0.15, `${cold.target} vs ${g.target}`)
 })
 
+test('Guide search: a goal that starts flat is still reached within the budget', async () => {
+  // A quiet voice's "voice touched" figure: ~0.003 dB per dB at the bottom of
+  // the travel, crossing 0.05 dB near drive 2.9 of [−3.3, 8]. The 0.3 dB/dB
+  // slope floor alone crawled 0.17 dB a render and returned null (all green).
+  const S = await import('../../src/audio/voxPressorSolve.js')
+  const f = d => 2e-4 * Math.exp(0.9 * (d + 3.3))
+  const goal = 0.05
+  const points = []
+  let renders = 0
+  const at = d => { renders++; points.push({ driveDb: d, v: f(d) }) }
+  at(0.257)
+  const d = S.findDrive(at, points, q => q.v, goal, 0.02, -3.3, 8, () => 10 - renders)
+  assert.ok(d !== null, 'not reached')
+  assert.ok(Math.abs(f(d) - goal) <= 0.02, `${d}: ${f(d)}`)
+  assert.ok(renders <= 10, `${renders} renders`)
+})
+
 test('Peaks guide: knob mapping inverts the drive law and clamps to the travel', async () => {
   const P = await import('../../src/audio/effects/voxPressorParams.js')
   for (const k of [0, 2.5, 10]) assert.ok(Math.abs(P.peaksKnobForDriveDb(P.peaksDriveDb(k)) - k) < 1e-12)
