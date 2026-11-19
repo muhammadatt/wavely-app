@@ -44,6 +44,8 @@ const FORBIDDEN_CALL = new RegExp(
 
 /** What each panel still calls itself — to be moved, then deleted from here. */
 const ALLOWED = {
+  // DEFERRED (owner, November 2026): mastering is dev-only and on hold; see
+  // docs/plugin-panel-audit.md before moving it.
   'PresetsPanel.vue': [
     'decodeAudioData', 'endProcessing', 'getAudioContext', 'processAudioOnServer',
     'startProcessing', 'updateProcessingProgress', 'updateProcessingStage',

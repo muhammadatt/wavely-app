@@ -18,6 +18,7 @@ import {
 import { getEffectChain } from '../audio/effectChain.js'
 import { voxPressorEffect as soloEffect, VOX_DEFAULTS } from '../audio/effects/voxPressor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { createVoxReadouts } from './voxPressorReadouts.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const VOX_WINDOW_ID = 'vox-pressor'
@@ -132,6 +133,13 @@ const copies = pluginCopies((copy, life) => {
   const voxInputLevels = ref([])
   const voxOutputLevels = ref([])
   let meterId = null
+
+  /** What the faceplate says — readouts, warnings, guide zones (voxPressorReadouts.js). */
+  const readouts = createVoxReadouts({
+    voxPeaks, voxBody, voxSpeed, voxParallel, voxParallelComp, voxPreview,
+    voxReadout, voxMeasured, voxBusy, voxUpstreamStale, voxPeaksStale,
+    voxPeaksGuide, voxBodyGuide, voxPeaksGr, voxBodyGr, voxParallelGr,
+  })
 
   /**
    * The voice's corner and median F0 are properties of the SPEAKER: measured
@@ -776,6 +784,7 @@ const copies = pluginCopies((copy, life) => {
       syncDeEss, syncParallel, syncParallelComp, syncDensity,
       syncParallelDeEss, syncParallelSibEmph, syncParallelDeEssMode, syncDeEssSplit,
       refreshSolve, apply, teardown, openModal, closeModal,
+      ...readouts,
     }
   }
 

@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue'
 import { useVoxPressor } from '../../composables/useVoxPressor.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { releaseSecondsForDial } from '../../audio/fet1176Processor.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import ModulaDrumCounter from '../modula/ModulaDrumCounter.vue'
@@ -14,9 +13,7 @@ import VoxSlideSwitch from './voxpressor/VoxSlideSwitch.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import { isVoxPressorBenchVisible } from '../../audio/effects/voxPressorBench.js'
 import {
-  VOX_DEFAULTS,
-  PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, PEAKS_RIPPLE_WARN_DB, peaksTiming,
-  BODY_GUIDE_EDGE_DB, BODY_GUIDE_WARN_DB,
+  VOX_DEFAULTS, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX,
 } from '../../audio/effects/voxPressorParams.js'
 import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
@@ -25,16 +22,17 @@ defineProps({ z: { type: Number, default: 500 } })
 const {
   voxPeaks, voxBody, voxBodyLookahead, voxSpeed,
   voxPeaksMode, voxCeiling, syncPeaksMode, syncCeiling,
-  voxDeEss, voxParallel, voxParallelComp, voxDensity, voxParallelGr,
+  voxDeEss, voxParallel, voxParallelComp, voxDensity,
   voxParallelDeEss, voxParallelSibEmph, voxParallelDeEssMode, voxDeEssSplit,
-  voxPeaksGuide, voxBodyGuide, voxUpstreamStale, voxPeaksStale,
   voxParallelDrive, syncParallelDrive,
-  voxMeasured, voxReadout, voxBusy,
-  voxPreview, voxPeaksGr, voxBodyGr, voxInputLevels, voxOutputLevels,
+  voxPreview, voxInputLevels, voxOutputLevels,
   togglePreview, syncPeaks, syncBody, syncBodyLookahead, syncSpeed,
   syncDeEss, syncParallel, syncParallelComp, syncDensity,
   syncParallelDeEss, syncParallelSibEmph, syncParallelDeEssMode, syncDeEssSplit,
   apply, teardown, closeModal,
+  // What the faceplate says, decided in the composable (voxPressorReadouts.js).
+  stageGrDb, stageReadout, speedInUse, measuredSummary,
+  peaksZones: voxPeaksZones, bodyZones: voxBodyZones,
 } = useVoxPressor()
 
 // The bench: dev builds (or the localStorage flag) only, and shut by default.
@@ -84,9 +82,7 @@ const METER_OPTIONS = [
   { value: 'parallel', label: 'DENSITY', title: "The parallel copy's gain reduction" },
 ]
 const meter = ref('peaks')
-// The effect reports reduction as NEGATIVE dB (DynamicsCompressorNode's
-// convention, which the GR bars read with Math.abs); the needle wants it positive.
-const meterDb = computed(() => Math.abs({ peaks: voxPeaksGr.value, body: voxBodyGr.value, parallel: voxParallelGr.value }[meter.value] ?? 0))
+const meterDb = computed(() => stageGrDb(meter.value))
 const meterLabel = computed(() => METER_OPTIONS.find(o => o.value === meter.value)?.label ?? '')
 const follow = (stage, fn) => (v) => { meter.value = stage; fn(v) }
 /**
@@ -200,155 +196,19 @@ function formatKnob(v) {
   return v > 0 ? String(Math.round(v)) : 'OFF'
 }
 
-// The readouts are MEASURED at the knobs (`measureVoxPressor`): the knobs act
-// at once, the numbers follow when the measurement lands.
-// A warning, never a cap: the knob always goes where it is turned, and this
-// says when that has started lowering the voice itself (PEAKS_BODY_WARN_DB).
-const peaksWarn = computed(() => {
-  const r = voxReadout.value
-  return !!r && voxPeaks.value > 0 && r.peaksBodyDb > PEAKS_BODY_WARN_DB
-})
-// Amber from the first touch, as the ring: any reduction of the voice.
-const peaksTouch = computed(() => {
-  const r = voxReadout.value
-  return !!r && voxPeaks.value > 0 && r.peaksBodyDb >= PEAKS_BODY_TOUCH_DB
-})
-
-// THE PEAKS GUIDE (`measureVoxPressor`'s `peaksGuide`): green while the stage
-// leaves the voice alone, amber from the first touch (PEAKS_BODY_TOUCH_DB),
-// red past PEAKS_BODY_WARN_DB (owner, November 2026: the Peaks stage should
-// not reduce the body at all). A guide, never a cap.
-const GUIDE_OK = '#6fd08c'
-const GUIDE_EDGE = '#e8a33d'
-const GUIDE_OVER = '#ff5a5a'
-const peaksZones = computed(() => {
-  const g = voxPeaksGuide.value
-  if (!g) return null
-  const red = Math.max(g.touch, g.warn)
-  return [
-    { from: 0, to: g.touch * KNOB_SCALE, color: GUIDE_OK },
-    { from: g.touch * KNOB_SCALE, to: red * KNOB_SCALE, color: GUIDE_EDGE },
-    { from: red * KNOB_SCALE, to: PEAKS_MAX * KNOB_SCALE, color: GUIDE_OVER },
-  ]
-})
-
-// THE BODY GUIDE (`measureVoxPressor`'s `bodyGuide`): green while the LA-2A
-// levels this voice gently, amber past BODY_GUIDE_EDGE_DB of average leveling,
-// red past BODY_GUIDE_WARN_DB. Reasoned; a guide, never a cap.
-const bodyZones = computed(() => {
-  const g = voxBodyGuide.value
-  if (!g) return null
-  const red = Math.max(g.edge, g.warn)
-  return [
-    { from: 0, to: g.edge * KNOB_SCALE, color: GUIDE_OK },
-    { from: g.edge * KNOB_SCALE, to: red * KNOB_SCALE, color: GUIDE_EDGE },
-    { from: red * KNOB_SCALE, to: BODY_MAX * KNOB_SCALE, color: GUIDE_OVER },
-  ]
-})
-const bodyEdge = computed(() => {
-  const r = voxReadout.value
-  return !!r && voxBody.value > 0 && r.bodyDb >= BODY_GUIDE_EDGE_DB
-})
-const bodyOver = computed(() => {
-  const r = voxReadout.value
-  return !!r && voxBody.value > 0 && r.bodyDb >= BODY_GUIDE_WARN_DB
-})
-
-// Gain ripple: the 1176 moving its gain within the voice's own cycles. A
-// warning, never a limit, like the voice-touched note.
-const rippleWarn = computed(() => {
-  const r = voxReadout.value
-  return !!r && voxPeaks.value > 0 && Number.isFinite(r.peaksRippleDb) && r.peaksRippleDb > PEAKS_RIPPLE_WARN_DB
-})
-const rippleNote = computed(() => {
-  const r = voxReadout.value
-  if (!r || voxPeaks.value <= 0 || !Number.isFinite(r.peaksRippleDb)) return ''
-  const v = `ripple ${r.peaksRippleDb.toFixed(0)} dB`
-  return rippleWarn.value ? `${v} · distorting${voxSpeed.value === 'gentle' ? '' : ', try NORMAL'}` : v
-})
-
-/** A reduction, dB ≥ 0, as the readouts print it: −x.x, and 0.0 rather than "−0.0". */
-const cut = v => (Math.abs(v) < 0.05 ? '0.0' : `−${Math.abs(v).toFixed(1)}`)
-
-const bodyLine = computed(() => {
-  if (voxBody.value <= 0) return 'stage out'
-  const r = voxReadout.value
-  return r ? [{ k: 'avg leveling', v: `${cut(r.bodyDb)} dB` }] : ''
-})
-// The numbers on screen describe the knobs they were measured at; while a
-// newer measurement is in flight they are dimmed rather than blanked.
-// Only when the measurement in flight can change them: a Parallel move
-// re-solves Parallel alone and leaves these exactly as they are.
-const stale = computed(() => voxUpstreamStale.value)
-
 /**
- * THE READOUT UNDER THE METER DRUM, for the stage the needle reads (owner,
- * November 2026). Line 1: what the stage did, measured — never the GR (the
- * needle above it shows that) and never a knob's own value (the knob shows
- * it). Detached from the knobs, each figure NAMES WHAT IT MEASURES and carries
- * its unit (owner, November 2026): property–value pairs, the property dimmed.
- * Line 2: the measurement in flight ("measuring…" before the first figures,
- * "remeasuring…" after, the figures dimmed meanwhile), else the stage's
- * warning, else blank so the panel never jumps.
- *   Peaks     loudest peaks −x dB · voice −y dB   (taken off the loudest peaks; what it cost the voice)
- *   Body      avg leveling −x dB                  (the LA-2A's average reduction on the voice)
- *   Parallel  parallel makeup +x dB               (the copy's measured wet gain)
+ * THE GUIDE ZONES on the Peaks and Body rings: useVoxPressor decides where
+ * they fall (ok / edge / over, in param units); the panel scales them to its
+ * 0–100 knobs and colours them. A guide, never a cap.
  */
-const peaksLine = computed(() => {
-  if (voxPeaks.value <= 0) return 'stage out'
-  const r = voxReadout.value
-  return r ? [{ k: 'loudest peaks', v: `${cut(r.peaksDb)} dB` }, { k: 'voice', v: `${cut(r.peaksBodyDb)} dB` }] : ''
-})
-// Parallel: the copy's measured MAKEUP (its wet gain, solved on the blend —
-// mostly Drive's; Mix moves it a few tenths). Its mix and compressor are on
-// the knobs above it, and the readouts never repeat a knob.
-const parallelLine = computed(() => {
-  if (voxParallel.value <= 0) return 'stage out'
-  const m = voxMeasured.value.parallelMakeupDb
-  if (!Number.isFinite(m)) return ''
-  return [{ k: 'parallel makeup', v: `${m >= 0 ? '+' : '−'}${Math.abs(m).toFixed(1)} dB` }]
-})
-// Peaks and Body read the measurement upstream of Parallel; Parallel is
-// re-solved by every measurement, so any one in flight makes it stale.
-const parallelStale = computed(() => voxBusy.value && voxPreview.value)
-// The Attack / release setter times BOTH 1176s — the Peaks stage and the
-// parallel copy when it is the 1176 — so it is live while either is in.
-const speedInUse = computed(() => voxPeaks.value > 0 || (voxParallel.value > 0 && voxParallelComp.value === '1176'))
-const readouts = computed(() => ({
-  peaks: {
-    line: peaksLine.value, stale: voxPeaksStale.value,
-    warn: peaksTouch.value, over: peaksWarn.value,
-    // The ripple takes the second line when it warns and nothing is measuring.
-    note: rippleWarn.value ? rippleNote.value : '',
-  },
-  body: { line: bodyLine.value, stale: stale.value, warn: bodyEdge.value, over: bodyOver.value },
-  parallel: { line: parallelLine.value, stale: parallelStale.value },
-}))
+const GUIDE_COLORS = { ok: '#6fd08c', edge: '#e8a33d', over: '#ff5a5a' }
+const onKnob = zones => zones && zones.map(z => ({ from: z.from * KNOB_SCALE, to: z.to * KNOB_SCALE, color: GUIDE_COLORS[z.level] }))
+const peaksZones = computed(() => onKnob(voxPeaksZones.value))
+const bodyZones = computed(() => onKnob(voxBodyZones.value))
 
-/** The readout under the drum: the stage the needle reads. */
-const readout = computed(() => {
-  const r = readouts.value[meter.value] ?? readouts.value.peaks
-  // A stage that is out has nothing being measured; one with no figures yet
-  // says "measuring…", one with figures "remeasuring…".
-  const out = r.line === 'stage out'
-  const busy = !out && (r.stale || (!r.line && voxBusy.value))
-  return { ...r, line: r.line || (busy ? '' : '—'), status: busy ? (r.line ? 'remeasuring…' : 'measuring…') : '' }
-})
-
-const measuredNote = computed(() => {
-  const m = voxMeasured.value
-  const corner = Number.isFinite(m.cornerHz) ? `voice corner ${Math.round(m.cornerHz)} Hz` : 'voice corner 80 Hz (default)'
-  const t = peaksTiming(voxSpeed.value, m.voiceF0Hz)
-  const release = `release ${Math.round(releaseSecondsForDial(t.release) * 1000)} ms`
-  const speed = voxSpeed.value === 'auto'
-    ? (Number.isFinite(m.voiceF0Hz) ? `F0 ${Math.round(m.voiceF0Hz)} Hz → ${release}` : `${release} until F0 is measured`)
-    : release
-  // Per-stage makeup, restores included: the 1176's lands on its Output, the
-  // LA-2A's is its Gain plus the restore after the chain.
-  const sign = v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
-  const makeup = `makeup 1176 ${sign(m.peaksMakeupDb ?? 0)} · LA-2A ${sign((m.bodyMakeupDb ?? 0) + (m.makeupDb ?? 0))} dB`
-  return `${corner} · ${speed} · ${makeup}`
-})
+/** The readout under the meter drum: the stage the needle reads (useVoxPressor's `stageReadout`). */
+const readout = computed(() => stageReadout(meter.value))
+const measuredNote = measuredSummary
 </script>
 
 <template>
