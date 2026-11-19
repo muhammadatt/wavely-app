@@ -46,6 +46,7 @@ import ModulaButton from '../modula/ModulaButton.vue'
 import ModulaField from '../modula/ModulaField.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import { radioArrowKey, radioTabStop } from '../../ui/radioKeys.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -109,9 +110,8 @@ function pickMode(m) {
   if (!processing.value) setEngine(m.value)
 }
 
-async function applyAndClose() {
-  if (await apply()) closeModal()
-}
+// Apply-then-close (offline: the window stays open unless the run committed).
+const { applyAndClose } = usePluginWindow({ apply, closeModal, closeOnlyOnSuccess: true })
 </script>
 
 <template>

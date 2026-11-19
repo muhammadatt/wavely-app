@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useLA2A } from '../../composables/useLA2A.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { LOOKAHEAD_MAX_MS, LA2A_DEFAULTS } from '../../audio/effects/la2aCompressor.js'
 import { SC_EMPH_MAX_DB, LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../../audio/la2aProcessor.js'
 import { INPUT_TRIM_MAX_DB } from '../../audio/dsp/inputAlign.js'
@@ -19,6 +18,7 @@ import { engraving, evenAngles, formatSignedDb } from '../hardware/hardwareDial.
 import FloatingWindow from './FloatingWindow.vue'
 import LA2ATuningPanel from './LA2ATuningPanel.vue'
 import { isLA2ATuningVisible } from '../../audio/effects/la2aTuning.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -41,13 +41,14 @@ const {
  */
 const showTuningBench = isLA2ATuningVisible()
 
-const { state } = useEditorState()
-
-// Default to engaged when the panel opens
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!la2aPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: la2aPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 // The window chrome keeps OptoSmooth's amber; the faceplate is the Vintage 2A
@@ -137,26 +138,6 @@ function setInputAuto(on) {
  */
 const toggleHarmonics = () => syncAnalog(!la2aAnalog.value)
 
-// Preview is just transport playback: the worklet is already in the chain, so
-// what makes this effect "live" is that the audio is running while you turn the
-// knobs. Reuses the existing toggle-play bus rather than a second play path.
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-// The shell removes itself from the window manager; this only has to stop the
-// preview chain and the meter loop.
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  // apply() already disables the preview, but the meter loop is still running.
-  teardown()
-  closeModal()
-}
-
 /**
  * Presets. Read and write live in pluginSettings.js (shared with saved plugin
  * chains), including why the Gain knob goes last, through the AUTO decision.
@@ -177,7 +158,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
     :engaged="la2aPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!la2aPreview"
     apply-disabled-hint="Turn LA Vintage 2A on to apply it"

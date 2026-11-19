@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useVocalSaturation } from '../../../composables/useVocalSaturation.js'
-import { currentPluginCopy } from '../../../composables/pluginCopies.js'
 // Bound rather than retyped: HARDNESS_MIN is an aliasing measurement, and a
 // panel that drifted from it would hand the curve an n the kernel then clamps,
 // leaving a knob whose last stretch of travel does nothing.
@@ -12,6 +11,7 @@ import Knob from '../../knobs/Knob.vue'
 import DeviceSlider from '../../knobs/DeviceSlider.vue'
 import DeviceChoiceRocker from '../../knobs/DeviceChoiceRocker.vue'
 import LevelMeter from '../../meters/LevelMeter.vue'
+import { usePluginWindow } from '../../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -27,13 +27,14 @@ const {
   apply, teardown, closeModal,
 } = useVocalSaturation()
 
-const { state } = useEditorState()
-
-// Default to engaged when the panel opens, matching the other plugin windows.
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!vsPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: vsPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#ff8a5b'
@@ -62,20 +63,6 @@ const oneDp = v => v.toFixed(1)
 const percent = v => `${Math.round(v * 100)}`
 const hertz = v => `${Math.round(v)} Hz`
 const multiplier = v => `${v.toFixed(2)}×`
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -89,7 +76,7 @@ async function applyAndClose() {
     :engaged="vsPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!vsPreview"
     apply-disabled-hint="Turn TubeSat on to apply it"

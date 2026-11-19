@@ -127,7 +127,7 @@ That is about 25 lines per panel. With one `usePluginWindow(api)` helper, a guar
 
 ## 4. Proposed order of work
 
-1. Write `usePluginWindow(api)` and move boilerplate (a)–(e) into it, then add the guard test, listing today's offenders as a shrinking allowlist.
+1. ✓ DONE (November 2026): `usePluginWindow` (`src/composables/usePluginWindow.js`) absorbs boilerplate (a)–(e) in all 20 plugin windows; Play / Stop goes through `src/ui/transportBus.js`; `test/ui/panelLogicGuard.test.js` bans the boilerplate and direct measuring / rendering / engine / commit calls in panels, with today's offenders as a shrinking allowlist (`ALLOWED`).
 2. Create `useLoudnessNormalize` / `usePeakNormalize` / `useVolume` / `useFade` on top of `useRegionApply`. This also fixes the pin rule.
 3. Do the shared De-Esser/Plosive helpers and the `*ResponseDb` exposures.
 4. Do VoxPressor and mastering.

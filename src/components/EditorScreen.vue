@@ -18,6 +18,7 @@ import ContextPanel from './ContextPanel.vue'
 import EmptyState from './EmptyState.vue'
 import ProcessingOverlay from './ProcessingOverlay.vue'
 import RotateHint from './RotateHint.vue'
+import { requestTogglePlayback } from '../ui/transportBus.js'
 
 const {
   state, appState, performCut, performCopy, performPaste,
@@ -198,7 +199,7 @@ function handleKeydown(e) {
   if (e.code === 'Space') {
     e.preventDefault()
     if (e.target instanceof HTMLElement && e.target !== document.body) e.target.blur()
-    window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
+    requestTogglePlayback()
     return
   }
 

@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useAirBand } from '../../composables/useAirBand.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { airBandSections } from '../../audio/airBandProcessor.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
@@ -14,6 +13,7 @@ import { AIR_BOOST_PRESET_PLUGIN } from '../../audio/pluginPresets/airBoost.js'
 import {
   AIR_BAND_DEFAULTS, AIR_MAX_DB, AIR_OUTPUT_MIN_DB, AIR_OUTPUT_MAX_DB,
 } from '../../audio/airBandParams.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -27,11 +27,14 @@ const presets = usePluginPresets(AIR_BOOST_PRESET_PLUGIN, airBandSettings(plugin
 
 const { state } = useEditorState()
 
-// Default to engaged when the panel opens, matching the other plugin windows.
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!airBandPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: airBandPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#8fd48a'
@@ -106,22 +109,6 @@ function gridLabelStyle(freqHz) {
     transform: 'translateX(-50%)',
   }
 }
-
-// Preview is transport playback — the worklet is already in the chain, so what
-// makes it live is that audio is running while you turn the knob.
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -139,7 +126,7 @@ async function applyAndClose() {
     :engaged="airBandPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!airBandPreview"
     apply-disabled-hint="Turn Air Boost on to apply it"

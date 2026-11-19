@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useVoxPressor } from '../../composables/useVoxPressor.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { releaseSecondsForDial } from '../../audio/fet1176Processor.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
@@ -19,6 +18,7 @@ import {
   PEAKS_BODY_WARN_DB, PEAKS_BODY_TOUCH_DB, BODY_LOOKAHEAD_STEPS_MS, PEAKS_MAX, PARALLEL_DRIVE_MAX, BODY_MAX, PEAKS_RIPPLE_WARN_DB, peaksTiming,
   BODY_GUIDE_EDGE_DB, BODY_GUIDE_WARN_DB,
 } from '../../audio/effects/voxPressorParams.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -37,15 +37,18 @@ const {
   apply, teardown, closeModal,
 } = useVoxPressor()
 
-const { state } = useEditorState()
-
 // The bench: dev builds (or the localStorage flag) only, and shut by default.
 const showBench = isVoxPressorBenchVisible()
 const benchOpen = ref(false)
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS (see SchepsModal).
-  if (!voxPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: voxPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#e8a33d'
@@ -346,20 +349,6 @@ const measuredNote = computed(() => {
   const makeup = `makeup 1176 ${sign(m.peaksMakeupDb ?? 0)} · LA-2A ${sign((m.bodyMakeupDb ?? 0) + (m.makeupDb ?? 0))} dB`
   return `${corner} · ${speed} · ${makeup}`
 })
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -376,7 +365,7 @@ async function applyAndClose() {
     :engaged="voxPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     apply-feature="voxPressor"
     :apply-disabled="!voxPreview"

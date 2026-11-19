@@ -20,9 +20,8 @@
  * explanatory paragraph are off this panel (owner's call); the tooltips carry
  * what the captions said. The bench rows still render under it in dev builds.
  */
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { phatassSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
@@ -41,6 +40,7 @@ import PhatassBenchPanel from './PhatassBenchPanel.vue'
 import { isPhatassBenchVisible } from '../../audio/effects/phatassBench.js'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -54,10 +54,14 @@ const { state } = useEditorState()
 
 const presets = usePluginPresets(PHATASS_PRESET_PLUGIN, phatassSettings(pluginApi))
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!phPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: phPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#e8a33d'
@@ -101,20 +105,6 @@ const reelPeriod = computed(() => SPEED_OPTIONS.find(o => o.value === phParams.h
 const reelSpinning = computed(() => phPreview.value && state.isPlaying)
 
 const satReading = computed(() => (phPreview.value ? `${Math.round(phSatNeedle.value)}%` : 'OFF'))
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -131,7 +121,7 @@ async function applyAndClose() {
     :engaged="phPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!phPreview"
     apply-disabled-hint="Turn PHATaSS on to apply it"

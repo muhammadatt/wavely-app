@@ -17,9 +17,8 @@
  * events caught since RESET. DELTA plays only what was removed and never
  * reaches the apply path.
  */
-import { onMounted, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { usePlosive } from '../../composables/usePlosive.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   PLOSIVE_DEFAULTS, POP_DEPTH_MAX_DB, POP_FREQ_MIN_HZ, POP_FREQ_MAX_HZ, POP_RELEASE_MIN_MS, POP_RELEASE_MAX_MS,
@@ -37,6 +36,7 @@ import GainReductionBar from '../meters/GainReductionBar.vue'
 import { createPeakHold, useMeterFrame } from '../meters/ballistics.js'
 import DeEsserScope from '../meters/DeEsserScope.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -53,10 +53,14 @@ const presets = usePluginPresets(PLOSIVE_PRESET_PLUGIN, plosiveSettings(pluginAp
 const D = PLOSIVE_DEFAULTS
 const { state } = useEditorState()
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!plPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: plPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 // The scope freezes on what last played while the transport is stopped, and
@@ -120,20 +124,6 @@ function parseHz(t) {
   return parseFloat(m[1]) * (m[2] ? 1000 : 1)
 }
 const parseDepth = t => Math.abs(parseFloat(t))
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -155,7 +145,7 @@ async function applyAndClose() {
     delta-title="Hear only what is being removed — it should sound like thumps and short spits, not words. Monitoring only; Apply always renders the processed audio."
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!plPreview"
     apply-disabled-hint="Turn Plosive Tamer on to apply it"

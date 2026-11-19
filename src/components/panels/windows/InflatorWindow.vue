@@ -11,9 +11,8 @@
  * the level, and an Output that could raise it further would make every A/B
  * against bypass a loudness comparison).
  */
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useInflator } from '../../../composables/useInflator.js'
-import { currentPluginCopy } from '../../../composables/pluginCopies.js'
 import { useEditorState } from '../../../composables/useEditorState.js'
 import { inflatorSettings } from '../../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../../composables/usePluginPresets.js'
@@ -28,6 +27,7 @@ import ModulaKnob from '../../modula/ModulaKnob.vue'
 import ModulaFader from '../../modula/ModulaFader.vue'
 import ModulaLedPill from '../../modula/ModulaLedPill.vue'
 import ModulaMiniLadder from '../../modula/ModulaMiniLadder.vue'
+import { usePluginWindow } from '../../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -40,15 +40,16 @@ const {
   apply, teardown, closeModal,
 } = pluginApi
 
-const { state } = useEditorState()
-
 const presets = usePluginPresets(INFLATOR_PRESET_PLUGIN, inflatorSettings(pluginApi))
 
-// Default to engaged when the panel opens, matching the other plugin windows.
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!inPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: inPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#e8a33d'
@@ -72,20 +73,6 @@ const liftValues = computed(() => {
   return (v.length === 1 ? [v[0], v[0]] : v).map(db => db / LIFT_FULL_DB)
 })
 const liftText = computed(() => (inPreview.value ? `+${maxLiftDb.value.toFixed(1)} dB` : 'OFF'))
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -103,7 +90,7 @@ async function applyAndClose() {
     :engaged="inPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!inPreview"
     apply-disabled-hint="Turn Cambridge Inflator on to apply it"

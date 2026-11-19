@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useScheps } from '../../composables/useScheps.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { pultecNetSections, pultecSections } from '../../audio/dsp/pultec.js'
 import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
@@ -17,6 +16,7 @@ import {
   SCHEPS_PRESET_PLUGIN, SCHEPS_OUTPUT_MIN_DB, SCHEPS_OUTPUT_MAX_DB,
 } from '../../audio/pluginPresets/scheps.js'
 import { SCHEPS_DEFAULTS } from '../../audio/effects/schepsParams.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -33,11 +33,14 @@ const presets = usePluginPresets(SCHEPS_PRESET_PLUGIN, schepsSettings(pluginApi)
 
 const { state } = useEditorState()
 
-// Default to engaged when the panel opens, matching the other plugin windows.
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!schepsPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: schepsPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#e8a33d'
@@ -140,22 +143,6 @@ const TRACE_KEY = [
   { d: '1 3', c: 'rgba(255,255,255,.45)', t: 'Recovery' },
   { d: '', c: ACCENT, t: 'Net' },
 ]
-
-// Preview is transport playback — the worklet is already in the chain, so what
-// makes it live is that audio is running while you turn the knob.
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -173,7 +160,7 @@ async function applyAndClose() {
     :engaged="schepsPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!schepsPreview"
     apply-disabled-hint="Turn Scheps Parallel on to apply it"

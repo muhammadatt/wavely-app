@@ -4,6 +4,7 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { startPlayback, stopPlayback, setPlaybackLoop, setPlaybackRegion } from '../audio/playback.js'
 import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import BaseButton from './ui/BaseButton.vue'
+import { onTogglePlaybackRequest } from '../ui/transportBus.js'
 
 const {
   state, setPlayhead, getAudioContext, totalDuration, hasSelection, toggleLoop, hasFile,
@@ -159,13 +160,14 @@ function handleViewUpdate(e) {
   zoomLevel.value = Math.max(0, Math.min(100, t * 100))
 }
 
+let offTogglePlay = null
 onMounted(() => {
-  window.addEventListener('wavely:toggle-play', handleTogglePlay)
+  offTogglePlay = onTogglePlaybackRequest(handleTogglePlay)
   window.addEventListener('wavely:view-update', handleViewUpdate)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('wavely:toggle-play', handleTogglePlay)
+  offTogglePlay?.()
   window.removeEventListener('wavely:view-update', handleViewUpdate)
 })
 

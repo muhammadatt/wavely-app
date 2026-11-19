@@ -24,9 +24,8 @@
  * "when" lives; the strip only says "where and how far".
  * DELTA sits in the header and never reaches the apply path.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useDeEsser } from '../../composables/useDeEsser.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
   AIR_MAKEUP_MAX_DB,
@@ -46,6 +45,7 @@ import { DE_ESSER_PRESET_PLUGIN } from '../../audio/pluginPresets/deEsser.js'
 import { HF_SCOPE_SECONDS } from '../../audio/deEsserScope.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -64,10 +64,14 @@ const { state, appState } = useEditorState()
 const presets = usePluginPresets(DE_ESSER_PRESET_PLUGIN, deEsserSettings(pluginApi))
 const D = DE_ESSER_DEFAULTS
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!hfPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: hfPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 // The scope freezes on what last played while the transport is stopped, and
@@ -197,21 +201,6 @@ function formatGuard(v) {
 const guardLabel = computed(() =>
   hfGuard.value > 0 ? `floor ${guardToFloorDb(hfGuard.value).toFixed(0)} dB` : 'no guard',
 )
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
-
 </script>
 
 <template>
@@ -232,7 +221,7 @@ async function applyAndClose() {
     delta-title="Hear only what is being removed — it should sound like sibilance and nothing else. Monitoring only; Apply always renders the processed audio."
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!hfPreview"
     apply-disabled-hint="Turn De-Esser on to apply it"

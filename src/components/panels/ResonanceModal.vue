@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { RESONANCE_FOCUS_RANGES, focusThresholdFn } from '../../audio/resonanceFocus.js'
 import {
   RESONANCE_DEFAULTS,
@@ -36,6 +35,7 @@ import FloatingWindow from './FloatingWindow.vue'
 import { resonanceSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { RESO_TAME_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -72,10 +72,14 @@ const presets = usePluginPresets(RESO_TAME_PRESET_PLUGIN, resonanceSettings(plug
 
 const { state } = useEditorState()
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!resPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: resPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#8fd48a'
@@ -256,7 +260,6 @@ const signedDb = v => `${v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1)} dB`
  * restating what the control already shows.
  */
 
-
 // The kernel clamps the low end to what its analysis frame can resolve, so show
 // what it will actually search rather than what the preset asked for.
 const pitchRangeCaption = computed(() => {
@@ -264,20 +267,6 @@ const pitchRangeCaption = computed(() => {
   const r = effectivePitchRange(sr)
   return `${Math.round(r.minHz)}–${Math.round(r.maxHz)} Hz`
 })
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -299,7 +288,7 @@ async function applyAndClose() {
     delta-title="Hear only what is being removed. Monitoring only — Apply always renders the processed audio."
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!resPreview"
     apply-disabled-hint="Turn Reso Tame on to apply it"

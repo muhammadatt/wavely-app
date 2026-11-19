@@ -10,9 +10,8 @@
  * in the centre well between the IN and OUT ladders, the two notch controls in
  * a panel below.
  */
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useHumRemover } from '../../composables/useHumRemover.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { HUM_NOTCH_DEFAULTS } from '../../audio/effects/humNotch.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
@@ -20,6 +19,7 @@ import ModulaButton from '../modula/ModulaButton.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -30,12 +30,14 @@ const {
   apply, teardown, closeModal,
 } = useHumRemover()
 
-const { state } = useEditorState()
-
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!humPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: humPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#e8a33d'
@@ -132,20 +134,6 @@ function rejectionLabel(h) {
     default: return null
   }
 }
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -160,7 +148,7 @@ async function applyAndClose() {
     :engaged="humPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!humPreview || !hasEnabledNotches"
     :apply-disabled-hint="!humPreview

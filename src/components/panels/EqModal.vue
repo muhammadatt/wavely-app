@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useManualEq } from '../../composables/useManualEq.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { eqSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
@@ -12,6 +11,7 @@ import GeneralView from './eq/GeneralView.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
 import ModulaButton from '../modula/ModulaButton.vue'
 import ModulaKnob from '../modula/ModulaKnob.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 /**
  * The EQ faceplate — a parametric equaliser, on its own.
@@ -51,13 +51,17 @@ const PLOT_HEIGHT_BASE = 221
 const heightDelta = ref(0)
 const PLOT_HEIGHT = computed(() => PLOT_HEIGHT_BASE + heightDelta.value)
 
-onMounted(() => {
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: eq.eqPreview,
+  toggle: eq.togglePreview,
   // Opens with a starting layout rather than a bare plot — four unity bands,
   // so this cannot change what the user hears.
-  eq.seedGeneralBands()
-  // Default to engaged when the panel opens, matching the other plugin windows
-  // — except the chain's copy, whose slot's ON/BYPASS opening must not undo.
-  if (!eq.eqPreview.value && currentPluginCopy() === 'solo') eq.togglePreview()
+  onOpen: eq.seedGeneralBands,
+  apply: eq.apply,
+  teardown: eq.teardown,
+  closeModal: eq.closeModal,
 })
 
 const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
@@ -82,20 +86,6 @@ const windowWidth = computed(() => {
   const n = Math.max(MIN_STRIPS, eq.bands.value.length)
   return Math.max(MIN_WINDOW_W, ROW_CHROME_W + n * STRIP_W + (n - 1) * STRIP_GAP)
 })
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  eq.teardown()
-}
-
-async function applyAndClose() {
-  await eq.apply()
-  eq.teardown()
-  eq.closeModal()
-}
 </script>
 
 <template>
@@ -113,7 +103,7 @@ async function applyAndClose() {
     :engaged="eq.eqPreview.value"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!eq.eqPreview.value || activeBandCount === 0"
     :apply-disabled-hint="activeBandCount === 0

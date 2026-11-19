@@ -1,12 +1,12 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useVoiceRx } from '../../composables/useVoiceRx.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { isBandActive } from '../../audio/eqBands.js'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import VoiceRxView from './eq/VoiceRxView.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 /**
  * The VoiceRx faceplate — voice diagnosis, in its own window.
@@ -35,10 +35,14 @@ const hoveredRowRegion = ref(null)
 /** Which region the view is adjusting, so the matching row can light with it. */
 const hoveredPlotRegion = ref(null)
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!vox.eqPreview.value && currentPluginCopy() === 'solo') vox.togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: vox.eqPreview,
+  toggle: vox.togglePreview,
+  apply: vox.apply,
+  teardown: vox.teardown,
+  closeModal: vox.closeModal,
 })
 
 const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
@@ -106,20 +110,6 @@ function applyLabel(row) {
   if (!row.band) return 'APPLY'
   return 'RESTORE'
 }
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  vox.teardown()
-}
-
-async function applyAndClose() {
-  await vox.apply()
-  vox.teardown()
-  vox.closeModal()
-}
 </script>
 
 <template>
@@ -133,7 +123,7 @@ async function applyAndClose() {
     :engaged="vox.eqPreview.value"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!vox.eqPreview.value || activeBandCount === 0"
     :apply-disabled-hint="activeBandCount === 0

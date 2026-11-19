@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useSoftClipper } from '../../composables/useSoftClipper.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import { SCOPE_SECONDS } from '../../audio/effects/softClipper.js'
@@ -13,6 +12,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import ClipperScope from '../meters/ClipperScope.vue'
 import { lampFraction } from '../meters/ballistics.js'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -65,11 +65,14 @@ function envelope(offsetSeconds, seconds, columns) {
   )
 }
 
-// Default to engaged when the panel opens
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!clipperPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: clipperPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 // The kit's amber, like every Modula panel. The admin tuning panel keeps its
@@ -167,20 +170,6 @@ const limiterCaption = computed(() => {
   const sr = state.currentFile?.sampleRate ?? 44100
   return `limiter ${limiter} · ${limiterLatencyMs(sr).toFixed(1)} ms`
 })
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 
 function formatGain(v) {
   return `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
@@ -371,7 +360,6 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
     active: ready && Math.abs(db - fixedThresholdDb.value) <= SETTER_MATCH_DB,
   }
 }))
-
 </script>
 
 <template>
@@ -391,7 +379,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
     delta-title="Hear only what is being removed — the harmonics the clipper is generating, on their own. Monitoring only: Apply always renders the processed audio."
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!clipperPreview"
     apply-disabled-hint="Turn Soft Clipper on to apply it"
