@@ -158,3 +158,16 @@ test('it agrees with the window analysisWindow actually returns', () => {
       `region ${start}..${end} window ${w.start}..${w.end}`)
   }
 })
+
+test('voiceProfileSpans: the whole span when short; otherwise equal blocks spread from start to end', async () => {
+  const { voiceProfileSpans, VOICE_PROFILE_SAMPLE_S, VOICE_PROFILE_BLOCKS } = await import('../../src/audio/analysisWindow.js')
+  assert.deepEqual(voiceProfileSpans(2, 2), [])
+  assert.deepEqual(voiceProfileSpans(1, 1 + VOICE_PROFILE_SAMPLE_S), [{ start: 1, end: 1 + VOICE_PROFILE_SAMPLE_S }])
+  const spans = voiceProfileSpans(10, 610)
+  assert.equal(spans.length, VOICE_PROFILE_BLOCKS)
+  assert.equal(spans[0].start, 10)
+  assert.ok(Math.abs(spans.at(-1).end - 610) < 1e-9)
+  const total = spans.reduce((t, w) => t + (w.end - w.start), 0)
+  assert.ok(Math.abs(total - VOICE_PROFILE_SAMPLE_S) < 1e-9, `total ${total}`)
+  for (let i = 1; i < spans.length; i++) assert.ok(spans[i].start >= spans[i - 1].end, 'blocks overlap')
+})

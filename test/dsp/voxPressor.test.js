@@ -991,3 +991,26 @@ test('Parallel solve: cached on its inputs, warm start lands on the cold answer,
   const none = S.measureVoxPressor([x], SR, { ...kpAt({ parallel: 45 }), parallelMakeupGuess: undefined })
   for (const k of PAR) assert.deepEqual(none[k], mixCold[k], `no guess ${k}`)
 })
+
+test('Voice profile passed or measured: the same cache keys (a handed-back profile re-solves nothing)', async () => {
+  const S = await import('../../src/audio/voxPressorSolve.js')
+  const P = await import('../../src/audio/effects/voxPressorParams.js')
+  const x = narration(SR, { seconds: 12, levelDb: -22 })
+  const alignDb = inputAlignDbFor([x], SR)
+  const kp = { ...toKernelParams({ ...VOX_DEFAULTS, peaks: 3, body: 4.8, deEss: 0, parallel: 0, density: 0, alignDb }), peaksGuideRangeDb: P.peaksGuideRangeDb(), bodyGuidePrRange: P.bodyGuidePrRange() }
+  delete kp.cornerHz
+  delete kp.voiceF0Hz
+  S.clearVoxPressorMeasureCache()
+  const m = S.measureVoxPressor([x], SR, kp)
+  const g = S.measureVoxPressorGuides([x], SR, kp)
+  // The panel's next call hands the measured profile back, Body moved: both guides cached.
+  const handed = { ...kp, cornerHz: m.cornerHz, voiceF0Hz: m.voiceF0Hz, bodyPeakReduction: kp.bodyPeakReduction + 4 }
+  S.measureVoxPressor([x], SR, handed)
+  const g2 = S.measureVoxPressorGuides([x], SR, handed)
+  assert.equal(g2.peaksGuide, g.peaksGuide)
+  assert.equal(g2.bodyGuide, g.bodyGuide)
+  // And the answer is the same either way.
+  S.clearVoxPressorMeasureCache()
+  const cold = S.measureVoxPressor([x], SR, { ...kp, cornerHz: m.cornerHz, voiceF0Hz: m.voiceF0Hz })
+  for (const k of VOX_MEASURED_KEYS) assert.deepEqual(cold[k], m[k], k)
+})

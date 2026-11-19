@@ -6,6 +6,7 @@ import { useEntitlements } from './useEntitlements.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
   applyVoxPressorRegion, computeVoxPressorMeasure, computeVoxPressorGuides, computeVoxPressorExact, computePeakCache,
+  computeVoiceProfileSampled,
 } from '../audio/processing.js'
 import { analysedWholeRegion, regionAlignDb } from '../audio/analysisWindow.js'
 import { getSegmentDuration } from '../audio/operations.js'
@@ -131,9 +132,17 @@ const copies = pluginCopies((copy, life) => {
   const voxOutputLevels = ref([])
   let meterId = null
 
-  // The corner is a property of the material, not of the knobs: measured with
-  // the first measurement on a region and handed back to every later one.
-  let cornerFor = null
+  /**
+   * The voice's corner and median F0 are properties of the SPEAKER: measured
+   * once per file version on a spread excerpt of the whole timeline
+   * (`computeVoiceProfileSampled`) and handed to every measurement. They were
+   * measured per SELECTION, inside the measurement (~1 s of a ~4 s cold one on
+   * 30 s of narration), so every new selection paid for them again.
+   */
+  let profileFor = null
+  let profilePromise = null
+  /** The region the last full measurement was of (the two-pass rule in `solve`). */
+  let measuredRegion = null
   /** The Parallel compressor the last measured `parallelMakeupDb` belongs to (its warm start). */
   let parallelGuessComp = null
   /** Which (timeline, selection, knobs) the measured values belong to. */
@@ -257,6 +266,13 @@ const copies = pluginCopies((copy, life) => {
         ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
     }
 
+    /** Where `segments` end, seconds: the whole timeline's span. */
+    function timelineEnd(segments) {
+      return segments === state.segments
+        ? totalDuration.value
+        : segments.reduce((t, seg) => Math.max(t, seg.outputStart + getSegmentDuration(seg)), 0)
+    }
+
     /**
      * The file's alignment, over the WHOLE timeline (LA Vintage 2A's and LA
      * Classic 76's contract: one operating point for the whole file, whatever
@@ -266,14 +282,40 @@ const copies = pluginCopies((copy, life) => {
     function ensureAlignment(segments) {
       const key = timelineKey(segments)
       if (alignedFor === key && segments === state.segments) return
-      const end = segments === state.segments
-        ? totalDuration.value
-        : segments.reduce((t, seg) => Math.max(t, seg.outputStart + getSegmentDuration(seg)), 0)
+      const end = timelineEnd(segments)
       if (!(end > 0)) return
       const db = regionAlignDb(segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels)
       alignedFor = key
       voxAlignDb.value = db
       pushParam('alignDb', db)
+    }
+
+    /**
+     * The voice profile ({ cornerHz, voiceF0Hz }) for `segments`: cached per
+     * document version, shared while in flight. A chain's running segments
+     * are measured every time, as their alignment is.
+     */
+    function ensureVoiceProfile(segments) {
+      const key = timelineKey(segments)
+      const own = segments === state.segments
+      if (own && profileFor === key && profilePromise) return profilePromise
+      const end = timelineEnd(segments)
+      const promise = end > 0
+        ? computeVoiceProfileSampled(segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels)
+        : Promise.resolve({ cornerHz: null, voiceF0Hz: null })
+      if (!own) return promise
+      profileFor = key
+      profilePromise = promise
+      promise.then(prof => {
+        // Into the live params at once, ahead of the measurement that uses it.
+        if (profilePromise !== promise || timelineKey(state.segments) !== key) return
+        voxMeasured.value = { ...voxMeasured.value, ...prof }
+        pushParam('cornerHz', prof.cornerHz)
+        pushParam('voiceF0Hz', prof.voiceF0Hz)
+      }, () => {
+        if (profilePromise === promise) { profileFor = null; profilePromise = null }
+      })
+      return promise
     }
 
     /** The key a measurement belongs to: the timeline, the region and every setting it reads. */
@@ -299,12 +341,9 @@ const copies = pluginCopies((copy, life) => {
       voxPendingPeaksKey.value = peaksKey
       voxBusy.value = true
       try {
-        const kp = toKernelParams(currentParams())
-        // A new region measures its own voice: corner and F0 together.
-        if (cornerFor !== regionKey) {
-          delete kp.cornerHz
-          delete kp.voiceF0Hz
-        }
+        const profile = await ensureVoiceProfile(segments)
+        if (seq !== solveSeq) return null
+        const kp = { ...toKernelParams(currentParams()), cornerHz: profile.cornerHz, voiceF0Hz: profile.voiceF0Hz }
         // The LA-2A stage's makeup solve starts from the last answer, so a
         // knob move usually converges in one render.
         if (Number.isFinite(voxMeasured.value.bodyMakeupDb)) kp.bodyMakeupGuess = voxMeasured.value.bodyMakeupDb
@@ -327,11 +366,11 @@ const copies = pluginCopies((copy, life) => {
          * Parallel — which follow Body's output — are re-solved (another
          * ~1.6 s). A single pass left the Body knob sounding dead for 2.5 s:
          * the compression moved at once and its makeup trailed it.
-         * ⚠ Not on a new region: there the first pass measures the voice's
-         * corner and F0, which the second would have to be handed and would
-         * then key differently, measuring Body twice.
+         * Not on a new region (one pass there). That rule dates from when the
+         * first pass measured the voice's corner and F0; the profile is now
+         * measured ahead, so two passes would work there too.
          */
-        if (guide && cornerFor === regionKey && voxReadout.value?.upKey !== upKey) {
+        if (guide && measuredRegion === regionKey && voxReadout.value?.upKey !== upKey) {
           const r1 = await computeVoxPressorMeasure(
             segments, start, end, { ...kp, measureUntil: 'body' }, state.currentFile.sampleRate, state.currentFile.channels,
           )
@@ -353,7 +392,7 @@ const copies = pluginCopies((copy, life) => {
           segments, start, end, kp, state.currentFile.sampleRate, state.currentFile.channels,
         )
         if (seq !== solveSeq) return null
-        cornerFor = regionKey
+        measuredRegion = regionKey
         parallelGuessComp = kp.parallelComp
         const next = {}
         for (const k of MEASURED) next[k] = r[k] ?? null

@@ -410,6 +410,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
    * measures one region at a time; the answer is identical to a cold one.
    */
   const hash = channelsHash(channels)
+  p = withVoiceProfile(channels, sampleRate, p, hash)
   const key = upstreamKey(channels, sampleRate, p, hash)
   /**
    * `measureUntil: 'body'` — the panel's FIRST PASS after a Peaks / Body /
@@ -546,6 +547,7 @@ export function measureVoxPressorGuides(channels, sampleRate, p = {}) {
   const wantBody = Array.isArray(p.bodyGuidePrRange) && Number.isFinite(p.bodyAlignDb)
   if (!wantPeaks && !wantBody) return res
   const hash = channelsHash(channels)
+  p = withVoiceProfile(channels, sampleRate, p, hash)
   const key = upstreamKey(channels, sampleRate, p, hash)
   let up = upstreamCache?.key === key ? upstreamCache.value : null
   if (!up) {
@@ -578,6 +580,29 @@ export function measureVoxPressorGuides(channels, sampleRate, p = {}) {
   return res
 }
 
+/**
+ * `p` with the voice's corner and median F0 RESOLVED: as passed, or — when
+ * `cornerHz` is absent — measured here on the region (one cached entry, keyed
+ * on its samples).
+ *
+ * ⚠ EVERY CACHE KEY IS BUILT FROM THE RESOLVED PARAMS. Keyed on `p` as passed,
+ * a region measured with the profile absent (the panel's first measurement)
+ * and then with the measured values handed back (every later one) read as two
+ * different inputs, so the first knob move after a new region missed every
+ * cache: the Body guide re-solved from scratch (6 LA-2A renders, ~1.5 s on
+ * 30 s of narration) for an answer it already had.
+ */
+let profileCache = null
+function withVoiceProfile(channels, sampleRate, p, hash) {
+  if (p.cornerHz !== undefined) return p
+  const key = `${sampleRate}|${channels.length}|${channels[0]?.length ?? 0}|${hash}`
+  if (profileCache?.key !== key) {
+    const profile = measureVoiceProfile(channels, sampleRate)
+    profileCache = { key, value: { cornerHz: profile?.cornerHz ?? null, voiceF0Hz: profile?.medianF0Hz ?? null } }
+  }
+  return { ...p, ...profileCache.value }
+}
+
 /** The one cached upstream measurement (see `measureVoxPressor`). */
 let upstreamCache = null
 /** The one cached Parallel solve (see `parallelKey`). */
@@ -599,6 +624,7 @@ function bodyGuideKey(channels, sampleRate, p, up, hash) {
 /** Forget them — for tests that time or compare cold measurements. */
 export function clearVoxPressorMeasureCache() {
   upstreamCache = null
+  profileCache = null
   parallelCache = null
   bodyCache = null
   guideCache = null
