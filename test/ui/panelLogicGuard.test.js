@@ -44,25 +44,9 @@ const ALLOWED = {
   'DeEsserModal.vue': ['readTimelineEnvelope'],
   'PlosiveModal.vue': ['readTimelineEnvelope'],
   'SoftClipperModal.vue': ['readTimelineEnvelope'],
-  'FadePanel.vue': [
-    'computePeakCache', 'endProcessing', 'getAudioContext', 'pinActiveDocument',
-    'renderFadeRegion', 'replaceRegion', 'setPeakCache', 'startProcessing',
-  ],
-  'VolumePanel.vue': [
-    'adjustVolumeRegion', 'computePeakCache', 'endProcessing', 'getAudioContext',
-    'replaceRegion', 'setPeakCache', 'startProcessing',
-  ],
   'PresetsPanel.vue': [
     'decodeAudioData', 'endProcessing', 'getAudioContext', 'processAudioOnServer',
     'startProcessing', 'updateProcessingProgress', 'updateProcessingStage',
-  ],
-  'windows/LoudnessWindow.vue': [
-    'computePeakCache', 'endProcessing', 'getAudioContext', 'loudnessNormalizeRegion',
-    'measureRegionLoudness', 'replaceRegion', 'setPeakCache', 'startProcessing',
-  ],
-  'windows/NormalizeWindow.vue': [
-    'computePeakCache', 'endProcessing', 'getAudioContext', 'normalizeRegion',
-    'replaceRegion', 'setPeakCache', 'startProcessing',
   ],
 }
 

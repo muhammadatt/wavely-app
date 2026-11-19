@@ -128,7 +128,7 @@ That is about 25 lines per panel. With one `usePluginWindow(api)` helper, a guar
 ## 4. Proposed order of work
 
 1. ✓ DONE (November 2026): `usePluginWindow` (`src/composables/usePluginWindow.js`) absorbs boilerplate (a)–(e) in all 20 plugin windows; Play / Stop goes through `src/ui/transportBus.js`; `test/ui/panelLogicGuard.test.js` bans the boilerplate and direct measuring / rendering / engine / commit calls in panels, with today's offenders as a shrinking allowlist (`ALLOWED`).
-2. Create `useLoudnessNormalize` / `usePeakNormalize` / `useVolume` / `useFade` on top of `useRegionApply`. This also fixes the pin rule.
+2. ✓ DONE (November 2026): `useLoudnessNormalize` / `usePeakNormalize` / `useVolume` / `useFade`, all four applying through `applyToRegion` (`src/composables/regionApply.js`: refuse while processing → pin → render → peak cache → `pin.check()` → commit). Loudness, Peak Normalize and Volume now refuse a commit after a tab switch or an edit mid-render, as Fade already did. Their state keeps the window's lifetime, as before.
 3. Do the shared De-Esser/Plosive helpers and the `*ResponseDb` exposures.
 4. Do VoxPressor and mastering.
 5. Do the remaining SOME items one panel at a time, running `npm run smoke` after each.

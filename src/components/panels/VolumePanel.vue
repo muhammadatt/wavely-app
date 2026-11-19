@@ -1,50 +1,16 @@
 <script setup>
 import { ref } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
+import { useVolume } from '../../composables/useVolume.js'
 import ApplyAction from '../ui/ApplyAction.vue'
-import { adjustVolumeRegion, computePeakCache } from '../../audio/processing.js'
 
-const {
-  state, appState, hasSelection, getAudioContext, replaceRegion, setPeakCache,
-  startProcessing, endProcessing, showToast, editBlockedByProcessing,
-} = useEditorState()
-
-const gainDb = ref(0)
+const { state, hasSelection } = useEditorState()
+const { gainDb, apply: applyVolume } = useVolume()
 
 const gainDisplay = ref('0.0')
 
 function onGainInput() {
   gainDisplay.value = gainDb.value.toFixed(1)
-}
-
-async function applyVolume() {
-  if (!hasSelection.value || editBlockedByProcessing()) return
-  const { start, end } = state.selection
-  const selectionAtStart = { start, end }
-
-  // Pinned to this document: the render below reads it before its first
-  // await, but tabs stay usable while it runs, and the defaults follow the
-  // active tab — the commit and the status would land on another file.
-  const docId = appState.activeDocumentId
-  startProcessing('Adjusting volume...', docId)
-  try {
-    const ctx = getAudioContext()
-    const buffer = await adjustVolumeRegion(
-      state.segments, start, end, gainDb.value,
-      ctx, state.currentFile.sampleRate, state.currentFile.channels
-    )
-    const bufferId = replaceRegion(start, end, buffer, 'the volume adjustment', docId, selectionAtStart)
-
-    const cache = await computePeakCache(buffer, 256)
-    setPeakCache(bufferId, cache)
-
-    showToast(`Volume adjusted by ${gainDb.value >= 0 ? '+' : ''}${gainDb.value.toFixed(1)} dB`)
-  } catch (err) {
-    console.error('Volume adjust failed:', err)
-    showToast('Volume adjustment failed')
-  } finally {
-    endProcessing(docId)
-  }
 }
 </script>
 

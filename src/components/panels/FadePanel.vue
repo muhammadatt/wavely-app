@@ -1,34 +1,18 @@
 <script setup>
-import { ref, computed } from "vue"
-import { useEditorState, DocumentSwitchedError } from "../../composables/useEditorState.js"
+import { computed } from "vue"
+import { useEditorState } from "../../composables/useEditorState.js"
+import { useFade, FADE_TYPES, FADE_CURVES } from "../../composables/useFade.js"
 import ApplyAction from '../ui/ApplyAction.vue'
-import { renderFadeRegion, computePeakCache } from '../../audio/processing.js'
 import { fadeCurvePath } from '../../audio/dsp/fade.js'
-import { getTimelineDuration } from '../../audio/operations.js'
 
-const {
-  state, hasSelection, getAudioContext, replaceRegion, setPeakCache,
-  startProcessing, endProcessing, showToast, pinActiveDocument, editBlockedByProcessing,
-} = useEditorState()
-
-const fadeType = ref("in")
-const curveType = ref("linear")
+const { state, hasSelection } = useEditorState()
+const { fadeType, curveType, fadeSeconds, edgeWarning, apply } = useFade()
 
 // The type icons draw the selected curve too, so both rows show the real fade.
-const fadeTypes = computed(() => [
-  { id: "in", label: "Fade In" },
-  { id: "out", label: "Fade Out" },
-].map((t) => ({ ...t, path: fadeCurvePath(curveType.value, t.id) })))
+const fadeTypes = computed(() => FADE_TYPES.map(t => ({ ...t, path: fadeCurvePath(curveType.value, t.id) })))
 
 // Each curve icon is the real gain curve, drawn in the chosen direction.
-const curveTypes = computed(() => [
-  { id: "linear", label: "Linear" },
-  { id: "expo", label: "Expo" },
-  { id: "s-curve", label: "S-Curve" },
-].map((c) => ({ ...c, path: fadeCurvePath(c.id, fadeType.value) })))
-
-// The selection is the fade: its length is the fade's length.
-const fadeSeconds = computed(() => (state.selection ? state.selection.end - state.selection.start : 0))
+const curveTypes = computed(() => FADE_CURVES.map(c => ({ ...c, path: fadeCurvePath(c.id, fadeType.value) })))
 
 function durationDisplay() {
   return hasSelection.value ? fadeSeconds.value.toFixed(2) + " s" : "—"
@@ -37,52 +21,6 @@ function durationDisplay() {
 const hint = computed(() => (fadeType.value === "in"
   ? "Fades up from silence across the selection."
   : "Fades down to silence across the selection."))
-
-// A fade in that starts mid-file (or a fade out that ends mid-file) meets audio
-// at full level: the step from full level to silence there is audible.
-const edgeWarning = computed(() => {
-  const sel = state.selection
-  if (!sel) return ""
-  const EPS = 1e-6
-  if (fadeType.value === "in" && sel.start > EPS) {
-    return "The audio before the selection stays at full level, so it will jump to silence where the fade starts."
-  }
-  if (fadeType.value === "out" && sel.end < getTimelineDuration(state.segments) - EPS) {
-    return "The audio after the selection stays at full level, so it will jump back up where the fade ends."
-  }
-  return ""
-})
-
-const LABELS = { in: "fade in", out: "fade out" }
-
-async function apply() {
-  // One fade at a time: a second click while this one renders would render
-  // from the uncommitted timeline and commit a second undo step.
-  if (!hasSelection.value || editBlockedByProcessing()) return
-  const { start, end } = state.selection
-  const type = fadeType.value
-  const curve = curveType.value
-  const label = LABELS[type]
-  const pin = pinActiveDocument(`The ${label}`)
-  startProcessing(`Applying ${label}...`, pin.docId)
-  try {
-    const buffer = await renderFadeRegion(
-      state.segments, start, end, { type, curve },
-      getAudioContext(), state.currentFile.sampleRate, state.currentFile.channels,
-    )
-    const cache = await computePeakCache(buffer, 256)
-    pin.check()
-    const bufferId = replaceRegion(start, end, buffer, `the ${label}`, pin.docId, pin.selection)
-    setPeakCache(bufferId, cache)
-    const curveLabel = curveTypes.value.find((c) => c.id === curve)?.label ?? curve
-    showToast(`${label[0].toUpperCase()}${label.slice(1)} applied (${(end - start).toFixed(2)} s, ${curveLabel})`)
-  } catch (err) {
-    console.error("Fade failed:", err)
-    showToast(err instanceof DocumentSwitchedError ? err.message : `Fade failed: ${err.message}`)
-  } finally {
-    endProcessing(pin.docId)
-  }
-}
 </script>
 
 <template>

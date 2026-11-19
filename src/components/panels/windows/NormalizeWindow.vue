@@ -1,59 +1,18 @@
 <script setup>
-import { ref } from 'vue'
-import { useEditorState } from '../../../composables/useEditorState.js'
-import { normalizeRegion, computePeakCache } from '../../../audio/processing.js'
+import { usePeakNormalize, PEAK_TARGET_DEFAULT_DB as TARGET_DEFAULT_DB } from '../../../composables/usePeakNormalize.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import ModulaKnob from '../../modula/ModulaKnob.vue'
 
 defineProps({ z: { type: Number, default: 500 } })
 
-const {
-  state, appState, getAudioContext, replaceRegion, setPeakCache,
-  startProcessing, endProcessing, showToast, totalDuration,
-} = useEditorState()
+const { targetPeak, apply } = usePeakNormalize()
 
 const ACCENT = '#e8a33d'
-
-const TARGET_DEFAULT_DB = -1
-const targetPeak = ref(TARGET_DEFAULT_DB)
 
 function formatDb(v) {
   return v.toFixed(1)
 }
 const formatTarget = v => `${formatDb(v)} dB`
-
-async function applyNormalize(useSelection = true) {
-  const start = useSelection && state.selection ? state.selection.start : 0
-  const end = useSelection && state.selection ? state.selection.end : totalDuration.value
-
-  if (start >= end) return
-  const selectionAtStart = state.selection ? { ...state.selection } : null
-
-  // Pinned to this document: the render below reads it before its first
-  // await, but tabs stay usable while it runs, and the defaults follow the
-  // active tab — the commit and the status would land on another file.
-  const docId = appState.activeDocumentId
-  startProcessing('Normalizing...', docId)
-  try {
-    const ctx = getAudioContext()
-    const buffer = await normalizeRegion(
-      state.segments, start, end, targetPeak.value,
-      ctx, state.currentFile.sampleRate, state.currentFile.channels
-    )
-    const bufferId = replaceRegion(start, end, buffer, 'normalization', docId, selectionAtStart)
-
-    // Recompute peak cache for new buffer
-    const cache = await computePeakCache(buffer, 256)
-    setPeakCache(bufferId, cache)
-
-    showToast('Normalization applied')
-  } catch (err) {
-    console.error('Normalize failed:', err)
-    showToast('Normalization failed')
-  } finally {
-    endProcessing(docId)
-  }
-}
 </script>
 
 <template>
@@ -69,7 +28,7 @@ async function applyNormalize(useSelection = true) {
     show-preview
     :previewable="false"
     show-apply
-    @apply="applyNormalize()"
+    @apply="apply()"
   >
     <!-- One parameter, so it carries the face: the kit's large tick-ring knob
          rather than a lone slider adrift in the panel. -->
