@@ -29,7 +29,6 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useHFLimiter } from '../../composables/useHFLimiter.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { shelfResponseDb } from '../../audio/dsp/hfLimit.js'
 import {
   HF_LIMITER_DEFAULTS, FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
   RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TRANSIENT_MAX_DB,
@@ -51,6 +50,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const pluginApi = useHFLimiter()
 const {
+  responseDb,
   hflParams, hflPreview, hflDelta, hflReduction, hflTransient,
   hflInputLevels, hflOutputLevels,
   togglePreview, syncParam, toggleDelta, apply, teardown, closeModal,
@@ -60,7 +60,6 @@ const presets = usePluginPresets(HF_LIMITER_PRESET_PLUGIN, hfLimiterSettings(plu
 
 const D = HF_LIMITER_DEFAULTS
 
-const { state } = useEditorState()
 
 // Engage on open, Preview = Play / Stop, close and apply-then-close: the
 // shared plugin-window behaviour (usePluginWindow.js).
@@ -97,10 +96,8 @@ function yFor(db) {
   return (Math.max(DB_MIN, Math.min(0, db)) / DB_MIN) * CURVE_H
 }
 
-const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
-
 function pathFor(gain) {
-  const db = shelfResponseDb(sampleRate.value, hflParams.freq, gain, CURVE_FREQS, hflParams.shape)
+  const db = responseDb(CURVE_FREQS, gain)
   return CURVE_FREQS.map(
     (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${yFor(db[i]).toFixed(1)}`,
   ).join(' ')
@@ -113,9 +110,7 @@ const liveFill = computed(() => `${livePath.value} L${CURVE_W},0 L0,0 Z`)
 
 // ── The drag node: on the RANGE floor at FREQ ───────────────────────────────
 const node = computed(() => {
-  const [db] = shelfResponseDb(
-    sampleRate.value, hflParams.freq, Math.pow(10, -hflParams.range / 20), [hflParams.freq], hflParams.shape,
-  )
+  const [db] = responseDb([hflParams.freq], Math.pow(10, -hflParams.range / 20))
   return {
     left: `${(xFor(hflParams.freq) / CURVE_W) * 100}%`,
     top: `${(yFor(db) / CURVE_H) * 100}%`,

@@ -24,7 +24,7 @@
  * "when" lives; the strip only says "where and how far".
  * DELTA sits in the header and never reaches the apply path.
  */
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useDeEsser } from '../../composables/useDeEsser.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
@@ -36,16 +36,15 @@ import { softenLaw, SOFTEN_MAX } from '../../audio/deEsserSoftenStage.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
-import { createPeakHold, useMeterFrame } from '../meters/ballistics.js'
 import DeEsserScope from '../meters/DeEsserScope.vue'
 import DeEsserBandStrip from './DeEsserBandStrip.vue'
 import { deEsserSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { DE_ESSER_PRESET_PLUGIN } from '../../audio/pluginPresets/deEsser.js'
 import { HF_SCOPE_SECONDS } from '../../audio/deEsserScope.js'
-import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import FloatingWindow from './FloatingWindow.vue'
 import { usePluginWindow } from '../../composables/usePluginWindow.js'
+import { useTimelineEnvelope, useScopeTransportHold, useHeldReadings } from '../../composables/useScopeFeeds.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -58,8 +57,6 @@ const {
   hfReso, hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
   apply, teardown, closeModal,
 } = pluginApi
-
-const { state, appState } = useEditorState()
 
 const presets = usePluginPresets(DE_ESSER_PRESET_PLUGIN, deEsserSettings(pluginApi))
 const D = DE_ESSER_DEFAULTS
@@ -74,21 +71,9 @@ const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
   closeModal,
 })
 
-// The scope freezes on what last played while the transport is stopped, and
-// starts over if playback resumes somewhere else (a seek, a click on the
-// timeline): its history would describe audio that is no longer behind the
-// playhead.
-let stoppedAt = null
-watch(() => [state.isPlaying, hfPreview.value], ([playing]) => {
-  if (playing) {
-    if (stoppedAt !== null && Math.abs(state.playhead - stoppedAt) > 0.25) clearScope()
-    stoppedAt = null
-    holdScope(false)
-  } else {
-    stoppedAt = state.playhead
-    holdScope(true)
-  }
-}, { immediate: true })
+// The scope freezes while the transport is stopped and starts over if
+// playback resumes elsewhere (useScopeFeeds.js).
+useScopeTransportHold({ engaged: hfPreview, holdScope, clearScope })
 
 // The kit's amber. LISTEN takes the kit's second hue (a "where", not an amount).
 const ACCENT = '#e8a33d'
@@ -106,18 +91,8 @@ function lampStyle(level, colour) {
   }
 }
 
-/**
- * The timeline's peak envelope around the playhead, for the scope's lookahead
- * (and its history when the effect is bypassed). One scratch per side: both
- * are read in the same frame. See ClipperScope / SoftClipperModal.
- */
-const envelopeScratch = { ahead: null, behind: null }
-function envelope(offsetSeconds, seconds, columns) {
-  if (!state.segments?.length) return null
-  const side = offsetSeconds < 0 ? 'behind' : 'ahead'
-  if (envelopeScratch[side]?.length !== columns) envelopeScratch[side] = new Float32Array(columns)
-  return readTimelineEnvelope(state.segments, state.playhead + offsetSeconds, seconds, columns, envelopeScratch[side])
-}
+/** The timeline's peak envelope around the playhead, for the scope (useScopeFeeds.js). */
+const envelope = useTimelineEnvelope()
 
 // The Amount and its Split are a view over the two stages (useDeEsser): what
 // each stage actually got, as a note under the knob.
@@ -147,30 +122,18 @@ const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (h
  * then falls at 6 dB/s, and the text refreshes at most 5 times a second, so
  * what is printed is "the most it took just now" and stays long enough to read.
  */
-const READOUT_HOLD = { holdMs: 1000, fallPerSec: 6 }
-const READOUT_EVERY_MS = 200
-const readoutHolds = { total: createPeakHold(READOUT_HOLD), duck: createPeakHold(READOUT_HOLD), eq: createPeakHold(READOUT_HOLD), soft: createPeakHold(READOUT_HOLD) }
-const shown = ref({ total: 0, duck: 0, eq: 0, soft: 0 })
+const shown = useHeldReadings({
+  total: () => totalReduction.value,
+  duck: () => hfBroadband.value,
+  eq: () => hfReduction.value,
+  soft: () => hfSoftenCut.value,
+}, { holdMs: 1000, fallPerSec: 6, everyMs: 200 })
 // The de-ess lamp: lit by either stage's cut, held a moment so a 30 ms "s" is seen
 // (the cut itself reads once or twice a frame). Full at 3 dB.
-const deessHold = createPeakHold({ holdMs: 120, fallPerSec: 20 })
-const deessLamp = ref(0)
-let sinceReadout = 0
-useMeterFrame((dt) => {
-  deessLamp.value = Math.round(Math.min(1, deessHold.push(Math.max(hfBroadband.value, hfReduction.value), dt) / 3) * 20) / 20
-  const h = readoutHolds
-  const next = {
-    total: h.total.push(totalReduction.value, dt),
-    duck: h.duck.push(hfBroadband.value, dt),
-    eq: h.eq.push(hfReduction.value, dt),
-    soft: h.soft.push(hfSoftenCut.value, dt),
-  }
-  sinceReadout += dt
-  if (sinceReadout >= READOUT_EVERY_MS) {
-    sinceReadout = 0
-    shown.value = next
-  }
-})
+const lampHeld = useHeldReadings({
+  cut: () => Math.max(hfBroadband.value, hfReduction.value),
+}, { holdMs: 120, fallPerSec: 20 })
+const deessLamp = computed(() => Math.round(Math.min(1, lampHeld.value.cut / 3) * 20) / 20)
 const formatSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 // AUTO: the knob is the measurement, so say what it measured; manual says so.
 const airCaption = computed(() => (hfComp.value
@@ -356,7 +319,7 @@ const guardLabel = computed(() =>
         :envelope-fn="envelope"
         :window-seconds="HF_SCOPE_SECONDS * 2"
         :accent="ACCENT"
-        :held="!state.isPlaying"
+        :held="!isPlaying"
         :height="124"
         title="De-Esser activity: the waveform, shaded wherever it de-essed — playhead at the centre, played audio to its left, audio about to play to its right"
         @request-play="togglePlayback"

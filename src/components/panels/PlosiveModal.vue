@@ -17,7 +17,7 @@
  * events caught since RESET. DELTA plays only what was removed and never
  * reaches the apply path.
  */
-import { ref, watch } from 'vue'
+import { computed } from 'vue'
 import { usePlosive } from '../../composables/usePlosive.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import {
@@ -29,14 +29,13 @@ import { PLOSIVE_PRESET_PLUGIN } from '../../audio/pluginPresets/plosive.js'
 import { plosiveSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { HF_SCOPE_SECONDS } from '../../audio/deEsserScope.js'
-import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
-import { createPeakHold, useMeterFrame } from '../meters/ballistics.js'
 import DeEsserScope from '../meters/DeEsserScope.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import { usePluginWindow } from '../../composables/usePluginWindow.js'
+import { useTimelineEnvelope, useScopeTransportHold, useHeldReadings } from '../../composables/useScopeFeeds.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -51,7 +50,6 @@ const {
 const presets = usePluginPresets(PLOSIVE_PRESET_PLUGIN, plosiveSettings(pluginApi))
 
 const D = PLOSIVE_DEFAULTS
-const { state } = useEditorState()
 
 // Engage on open, Preview = Play / Stop, close and apply-then-close: the
 // shared plugin-window behaviour (usePluginWindow.js).
@@ -63,44 +61,25 @@ const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
   closeModal,
 })
 
-// The scope freezes on what last played while the transport is stopped, and
-// starts over if playback resumes somewhere else (the De-Esser's rule).
-let stoppedAt = null
-watch(() => [state.isPlaying, plPreview.value], ([playing]) => {
-  if (playing) {
-    if (stoppedAt !== null && Math.abs(state.playhead - stoppedAt) > 0.25) clearScope()
-    stoppedAt = null
-    holdScope(false)
-  } else {
-    stoppedAt = state.playhead
-    holdScope(true)
-  }
-}, { immediate: true })
+// The scope freezes while the transport is stopped and starts over if
+// playback resumes elsewhere (useScopeFeeds.js, the De-Esser's rule).
+useScopeTransportHold({ engaged: plPreview, holdScope, clearScope })
 
 const ACCENT = '#e8a33d'
 const BURST_COLOR = '#b9a6f2'
 const METER_H = 214
 
-/** The timeline's peak envelope around the playhead, for the scope's lookahead. */
-const envelopeScratch = { ahead: null, behind: null }
-function envelope(offsetSeconds, seconds, columns) {
-  if (!state.segments?.length) return null
-  const side = offsetSeconds < 0 ? 'behind' : 'ahead'
-  if (envelopeScratch[side]?.length !== columns) envelopeScratch[side] = new Float32Array(columns)
-  return readTimelineEnvelope(state.segments, state.playhead + offsetSeconds, seconds, columns, envelopeScratch[side])
-}
+/** The timeline's peak envelope around the playhead, for the scope (useScopeFeeds.js). */
+const envelope = useTimelineEnvelope()
 
 // Each bar and lamp is HELD: a burst is 15–40 ms, a frame or two, and read raw
 // it flickered past unseen. Peak for 0.4 s, then 20 dB/s.
-const HOLD = { holdMs: 400, fallPerSec: 20 }
-const popHold = createPeakHold(HOLD)
-const burstHold = createPeakHold(HOLD)
-const popShown = ref(0)
-const burstShown = ref(0)
-useMeterFrame((dt) => {
-  popShown.value = popHold.push(plPopCut.value, dt)
-  burstShown.value = burstHold.push(plBurstCut.value, dt)
-})
+const held = useHeldReadings({
+  pop: () => plPopCut.value,
+  burst: () => plBurstCut.value,
+}, { holdMs: 400, fallPerSec: 20 })
+const popShown = computed(() => held.value.pop)
+const burstShown = computed(() => held.value.burst)
 
 /** A lamp: dark at 0, lit and glowing at 1 (full at 3 dB of cut). */
 function lampStyle(db, colour) {
@@ -179,7 +158,7 @@ const parseDepth = t => Math.abs(parseFloat(t))
             :accent="ACCENT"
             :plosive-color="BURST_COLOR"
             :legend="{ treated: 'POP', plosive: 'BURST', guard: null }"
-            :held="!state.isPlaying"
+            :held="!isPlaying"
             :height="112"
             title="Plosive Tamer activity: the waveform, shaded amber where a pop was cut and lavender where a T, K or P release was — playhead at the centre, played audio to its left, audio about to play to its right"
             @request-play="togglePlayback"

@@ -7,6 +7,7 @@ import {
   applyHFLimiterRegion, computePeakCache,
 } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
+import { shelfResponseDb } from '../audio/dsp/hfLimit.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { hfLimiterEffect as soloHfLimiterEffect, HF_LIMITER_DEFAULTS } from '../audio/effects/hfLimiter.js'
@@ -227,7 +228,19 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /**
+     * The shelf's frequency response at `freqs`, dB, with its cut band at
+     * linear gain `gain` (1 = no cut), at the current Freq and shape and the
+     * file's rate (44.1 kHz before a file is loaded) — what the panel draws:
+     * the live cut, the Range floor and the node on it.
+     */
+    function responseDb(freqs, gain) {
+      const sr = state.currentFile?.sampleRate ?? 44100
+      return shelfResponseDb(sr, hflParams.freq, gain, freqs, hflParams.shape)
+    }
+
     return {
+      responseDb,
       hflParams,
       hflPreview,
       hflDelta,

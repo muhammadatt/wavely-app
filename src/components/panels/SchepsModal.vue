@@ -2,8 +2,6 @@
 import { computed } from 'vue'
 import { useScheps } from '../../composables/useScheps.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { pultecNetSections, pultecSections } from '../../audio/dsp/pultec.js'
-import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
@@ -22,6 +20,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const pluginApi = useScheps()
 const {
+  responseDb,
   schepsCharacter, schepsSquash, schepsMix, schepsOutput,
   schepsAutoTrim, schepsAutoTrimBusy, schepsWetTrimDb,
   schepsPreview, schepsReduction, schepsInputLevels, schepsOutputLevels,
@@ -31,7 +30,6 @@ const {
 
 const presets = usePluginPresets(SCHEPS_PRESET_PLUGIN, schepsSettings(pluginApi))
 
-const { state } = useEditorState()
 
 // Engage on open, Preview = Play / Stop, close and apply-then-close: the
 // shared plugin-window behaviour (usePluginWindow.js).
@@ -85,23 +83,16 @@ function yFor(db) {
   return CURVE_H / 2 - (Math.max(-DB_RANGE, Math.min(DB_RANGE, db)) / DB_RANGE) * (CURVE_H / 2)
 }
 
-function pathFor(sections, sr) {
-  const db = magnitudeResponseDb(sections, CURVE_FREQS, sr)
+function pathFor(stage) {
+  const db = responseDb(CURVE_FREQS, stage)
   return CURVE_FREQS.map(
     (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${yFor(db[i]).toFixed(1)}`,
   ).join(' ')
 }
 
-// The response is sample-rate dependent, so use the file's rate where we have
-// one and fall back to the most common rate before a file is loaded.
-const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
-
-const prePath = computed(() =>
-  pathFor(pultecSections(sampleRate.value, schepsCharacter.value, 'pre'), sampleRate.value))
-const postPath = computed(() =>
-  pathFor(pultecSections(sampleRate.value, schepsCharacter.value, 'post'), sampleRate.value))
-const netPath = computed(() =>
-  pathFor(pultecNetSections(sampleRate.value, schepsCharacter.value), sampleRate.value))
+const prePath = computed(() => pathFor('pre'))
+const postPath = computed(() => pathFor('post'))
+const netPath = computed(() => pathFor('net'))
 
 const netFill = computed(
   () => `${netPath.value} L${CURVE_W},${yFor(0)} L0,${yFor(0)} Z`,

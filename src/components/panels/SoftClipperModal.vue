@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue'
 import { useSoftClipper } from '../../composables/useSoftClipper.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import { SCOPE_SECONDS } from '../../audio/effects/softClipper.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
@@ -13,6 +12,7 @@ import ClipperScope from '../meters/ClipperScope.vue'
 import { lampFraction } from '../meters/ballistics.js'
 import FloatingWindow from './FloatingWindow.vue'
 import { usePluginWindow } from '../../composables/usePluginWindow.js'
+import { useTimelineEnvelope } from '../../composables/useScopeFeeds.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -37,33 +37,11 @@ const {
 const { state } = useEditorState()
 
 /**
- * The scope's view of the timeline around the playhead.
- *
- * It comes from here rather than from the effect because the effect has not
- * seen it — the kernel's ring only ever holds audio it has already processed,
- * which is nothing at all when the stage is bypassed and nothing ahead of the
- * playhead ever. The scope asks for the half ahead always, and for the half
- * behind whenever its ring is not live, so that bypassing the stage leaves one
- * waveform still travelling past the playhead rather than half a frozen one.
- *
- * Read live from `state.playhead`, which the transport advances every frame, so
- * the picture slides under a stationary playhead. It also works with the
- * transport stopped: park the playhead before a loud passage and the scope
- * shows what the current setting would do to it before anything is heard.
- *
- * ONE SCRATCH PER SIDE. Both are alive in the same frame, so a single shared
- * buffer would have the second call overwrite the first — the two halves would
- * show the same audio.
+ * The scope's view of the timeline around the playhead — read from the
+ * timeline, not the effect, so it shows audio the kernel has not processed
+ * (useScopeFeeds.js).
  */
-const envelopeScratch = { ahead: null, behind: null }
-function envelope(offsetSeconds, seconds, columns) {
-  if (!state.segments?.length) return null
-  const side = offsetSeconds < 0 ? 'behind' : 'ahead'
-  if (envelopeScratch[side]?.length !== columns) envelopeScratch[side] = new Float32Array(columns)
-  return readTimelineEnvelope(
-    state.segments, state.playhead + offsetSeconds, seconds, columns, envelopeScratch[side],
-  )
-}
+const envelope = useTimelineEnvelope()
 
 // Engage on open, Preview = Play / Stop, close and apply-then-close: the
 // shared plugin-window behaviour (usePluginWindow.js).

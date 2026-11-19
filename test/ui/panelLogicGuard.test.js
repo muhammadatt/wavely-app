@@ -35,19 +35,30 @@ const FORBIDDEN_CALL = new RegExp(
     // Measuring, rendering and the server.
     'measure[A-Z]\\w*', 'render[A-Z]\\w*Region', '\\w*[nN]ormalizeRegion', 'adjustVolumeRegion',
     'readTimelineEnvelope', 'processAudioOnServer', 'uploadAudio',
+    // A plugin's frequency response at the file's rate is its composable's
+    // (`responseDb`), not the panel's.
+    'magnitudeResponseDb', 'shelfResponseDb', 'eqResponseDb',
   ].join('|') + ')\\s*\\(',
   'g',
 )
 
 /** What each panel still calls itself — to be moved, then deleted from here. */
 const ALLOWED = {
-  'DeEsserModal.vue': ['readTimelineEnvelope'],
-  'PlosiveModal.vue': ['readTimelineEnvelope'],
-  'SoftClipperModal.vue': ['readTimelineEnvelope'],
   'PresetsPanel.vue': [
     'decodeAudioData', 'endProcessing', 'getAudioContext', 'processAudioOnServer',
     'startProcessing', 'updateProcessingProgress', 'updateProcessingStage',
   ],
+}
+
+/**
+ * Permanent exceptions, each with its reason — unlike ALLOWED, these are not
+ * work left to do. A generic plot component that draws the response of the
+ * filter it is HANDED in props (bands, a layer's emphasis, a sample rate) reads
+ * no plugin or editor state; computing the curve from its props is drawing.
+ */
+const EXEMPT = {
+  'eq/EqPlot.vue': ['eqResponseDb'],
+  'SaturationEmphasisPlot.vue': ['magnitudeResponseDb'],
 }
 
 function vueFiles(dir) {
@@ -81,6 +92,8 @@ test('no panel measures, renders, drives the engine or commits an edit itself', 
   for (const { name, script } of panels) {
     const calls = new Set([...script.matchAll(FORBIDDEN_CALL)].map(m => m[1]))
     const allowed = new Set(ALLOWED[name] ?? [])
+    const exempt = new Set(EXEMPT[name] ?? [])
+    for (const call of exempt) calls.delete(call)
     for (const call of calls) {
       if (!allowed.has(call)) problems.push(`${name} calls ${call}() — move it into the composable`)
     }

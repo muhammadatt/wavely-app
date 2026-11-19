@@ -2,8 +2,6 @@
 import { computed } from 'vue'
 import { useAirBand } from '../../composables/useAirBand.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { airBandSections } from '../../audio/airBandProcessor.js'
-import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -19,13 +17,13 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const pluginApi = useAirBand()
 const {
+  responseDb,
   airBandAir, airBandOutput, airBandPreview, airBandInputLevels, airBandOutputLevels,
   togglePreview, syncAir, syncOutput, applyParams, apply, teardown, closeModal,
 } = pluginApi
 
 const presets = usePluginPresets(AIR_BOOST_PRESET_PLUGIN, airBandSettings(pluginApi))
 
-const { state } = useEditorState()
 
 // Engage on open, Preview = Play / Stop, close and apply-then-close: the
 // shared plugin-window behaviour (usePluginWindow.js).
@@ -65,11 +63,7 @@ function yFor(db) {
 }
 
 const curvePath = computed(() => {
-  // The response is sample-rate dependent, so use the file's rate where we
-  // have one and fall back to the most common rate before a file is loaded.
-  const sr = state.currentFile?.sampleRate ?? 44100
-  const sections = airBandSections(sr, airBandAir.value)
-  const db = magnitudeResponseDb(sections, CURVE_FREQS, sr)
+  const db = responseDb(CURVE_FREQS)
   return CURVE_FREQS.map(
     (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${yFor(db[i]).toFixed(1)}`,
   ).join(' ')

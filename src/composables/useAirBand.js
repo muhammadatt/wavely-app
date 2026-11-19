@@ -7,6 +7,8 @@ import { applyAirBandRegion, computePeakCache } from '../audio/processing.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { airBandEffect as soloAirBandEffect, AIR_BAND_DEFAULTS } from '../audio/effects/airBand.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { airBandSections } from '../audio/airBandProcessor.js'
+import { magnitudeResponseDb } from '../audio/dsp/biquad.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const AIR_BAND_WINDOW_ID = 'air-band'
@@ -175,7 +177,17 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /**
+     * The Air curve's frequency response at `freqs`, dB, at the file's rate
+     * (44.1 kHz before a file is loaded) — what the panel draws.
+     */
+    function responseDb(freqs) {
+      const sr = state.currentFile?.sampleRate ?? 44100
+      return magnitudeResponseDb(airBandSections(sr, airBandAir.value), freqs, sr)
+    }
+
     return {
+      responseDb,
       airBandAir,
       airBandOutput,
       airBandPreview,

@@ -9,6 +9,8 @@ import { regionAlignDb } from '../audio/analysisWindow.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { schepsEffect as soloSchepsEffect, SCHEPS_DEFAULTS } from '../audio/effects/scheps.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { pultecSections, pultecNetSections } from '../audio/dsp/pultec.js'
+import { magnitudeResponseDb } from '../audio/dsp/biquad.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const SCHEPS_WINDOW_ID = 'scheps-parallel'
@@ -512,7 +514,22 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /**
+     * The Pultec stages' frequency response at `freqs`, dB, for the panel's
+     * curve: `stage` 'pre' (the push), 'post' (the recovery) or 'net' (both).
+     * At the file's rate (the response depends on it), 44.1 kHz before a
+     * file is loaded.
+     */
+    function responseDb(freqs, stage) {
+      const sr = state.currentFile?.sampleRate ?? 44100
+      const sections = stage === 'net'
+        ? pultecNetSections(sr, schepsCharacter.value)
+        : pultecSections(sr, schepsCharacter.value, stage)
+      return magnitudeResponseDb(sections, freqs, sr)
+    }
+
     return {
+      responseDb,
       schepsCharacter,
       schepsSquash,
       schepsMix,
