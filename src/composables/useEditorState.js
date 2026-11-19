@@ -109,8 +109,8 @@ const bufferPool = new Map()
 // Bytes of decoded audio in the pool, kept in step by poolSet / poolDelete —
 // the ONLY ways the pool changes. Read by the import check (memoryBudget.js)
 // before a file is decoded; a phone's tab is killed, not warned, when it runs
-// out. ⚠ Today a buffer leaves the pool only when its document closes: an
-// apply's output stays even after undo has dropped every step that used it.
+// out. A buffer leaves the pool when its document closes, or when nothing
+// reaches it any more (releaseUnreferencedBuffers, after each undo step).
 const poolBytes = ref(0)
 
 function poolSet(id, buffer) {
@@ -630,6 +630,15 @@ export function useEditorState() {
     return bufferSourceFiles.get(bufferId) ?? null
   }
 
+  /**
+   * Stop treating a file as the buffer's bytes — it can no longer be read (the
+   * original was replaced by a Save, moved or deleted on disk). Autosave then
+   * stores the decoded samples instead.
+   */
+  function forgetBufferSourceFile(bufferId) {
+    bufferSourceFiles.delete(bufferId)
+  }
+
   function setActiveDocument(docId) {
     if (appState.activeDocumentId === docId) return
     // Playback is a module singleton keyed to whatever segments were scheduled;
@@ -1133,6 +1142,7 @@ export function useEditorState() {
     createDocument,
     restoreDocument,
     getBufferSourceFile,
+    forgetBufferSourceFile,
     getDocument,
     pinActiveDocument,
     setActiveDocument,

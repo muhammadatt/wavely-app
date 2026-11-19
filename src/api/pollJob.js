@@ -11,15 +11,16 @@ const MAX_POLL_ATTEMPTS = 400       // 400 × 3 s = 20 min of processing
 // use it up, and the client would abandon a job the server then finishes. It
 // has its own, longer cap.
 const MAX_QUEUE_POLLS = 1200        // 1200 × 3 s = 60 min in line
-// A status check that fails to reach the server at all (fetch rejects with a
-// TypeError: offline, a phone waking from sleep, a dropped connection) is
-// tried again rather than abandoning a job the server is still running. This
-// many in a row gives up. An answer from the server (any status) is not retried.
+// A status check that fails to reach the server at all (offline, a phone
+// waking from sleep, a dropped connection) is tried again rather than
+// abandoning a job the server is still running. This many in a row gives up.
+// Only an error marked `networkError` counts (src/api/jobs.js marks fetch's own
+// rejection); an answer from the server, or a bug in the caller, is not retried.
 const MAX_NETWORK_RETRIES = 20      // ~1 min at 3 s
 
 /** A fetch that never reached the server, as opposed to an error it answered with. */
 export function isNetworkError(err) {
-  return err?.name === 'TypeError'
+  return err?.networkError === true
 }
 
 function sleep(ms) {

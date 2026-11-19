@@ -11,8 +11,21 @@ import { serverError } from './serverError.js'
 
 const API_BASE = import.meta.env?.VITE_API_BASE_URL ?? ''
 
+/**
+ * fetch(), with a failure to reach the server at all (offline, a phone waking
+ * from sleep, a dropped connection) marked `networkError` so polling can retry
+ * it (pollJob.js) — and nothing else.
+ */
+async function reach(url) {
+  try {
+    return await fetch(url)
+  } catch (err) {
+    throw Object.assign(err instanceof Error ? err : new Error(String(err)), { networkError: true })
+  }
+}
+
 export async function fetchJobStatus(jobId, fallback = 'Status check failed') {
-  const res = await fetch(`${API_BASE}/api/jobs/${encodeURIComponent(jobId)}`)
+  const res = await reach(`${API_BASE}/api/jobs/${encodeURIComponent(jobId)}`)
   if (!res.ok) throw await serverError(res, fallback)
   return res.json()
 }

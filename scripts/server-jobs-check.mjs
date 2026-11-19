@@ -47,7 +47,7 @@ writeFileSync(wav, wavBytes(10))
 
 let server = null
 if (!(await waitForServer(1000))) {
-  server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' })
+  server = spawn('node_modules/.bin/vite', ['--port', String(PORT), '--strictPort'], { stdio: 'ignore' })
   if (!(await waitForServer(40000))) { console.error('dev server did not start'); process.exit(1) }
 }
 
@@ -66,7 +66,7 @@ await page.addInitScript(() => new MutationObserver(m => m.forEach(r => r.addedN
 ))).observe(document, { childList: true, subtree: true }))
 
 // ── The mocked server ────────────────────────────────────────────────────────
-const server_ = { done: new Set(), downloads: 0, submitted: 0 }
+const server_ = { done: new Set(), downloads: 0, submitted: 0, polls: {} }
 let uploaded = 0
 await context.route(url => url.pathname.startsWith('/api/'), async (route) => {
   const req = route.request()
@@ -88,6 +88,7 @@ await context.route(url => url.pathname.startsWith('/api/'), async (route) => {
   const status = /^\/api\/jobs\/([^/]+)$/.exec(path)
   if (status) {
     const id = status[1]
+    server_.polls[id] = (server_.polls[id] ?? 0) + 1
     if (id === 'gone') return route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"Job not found or expired"}' })
     const body = server_.done.has(id)
       ? { status: 'done', report: null }
@@ -212,6 +213,22 @@ try {
   check(await until(async () => toasts.some(t => /Noise reduced with/.test(t))), 'a job in its own tab still lands as before')
   check((await records()).length === 0, 'and leaves no record behind')
   check(await notice.count() === 0, 'and never shows in the picked-up notice')
+
+  // 6. A tab that dies while this one stays open: picked up when this page comes back.
+  await page.evaluate((r) => {
+    localStorage.setItem('wavely:server-jobs', JSON.stringify([...JSON.parse(localStorage.getItem('wavely:server-jobs') ?? '[]'), r]))
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }, { ...rec, jobId: 'late', owner: 'closed-later', startedAt: Date.now() })
+  check(await until(async () => /late|Denoising/.test(await notice.innerText().catch(() => ''))), 'an open tab picks up a job left by a tab that closed later')
+
+  // 7. Stop waiting stops the polling.
+  check(await until(async () => (server_.polls.late ?? 0) >= 1), 'it polls the job')
+  await notice.getByRole('button', { name: 'Stop waiting' }).click()
+  const pollsAtStop = server_.polls.late
+  await page.waitForTimeout(7000)
+  check(server_.polls.late <= pollsAtStop + 1, `Stop waiting stops polling (${pollsAtStop} → ${server_.polls.late})`)
+  check(await notice.count() === 0 && (await records()).length === 0, 'and leaves no card or record')
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`)
 } finally {
   await browser.close()

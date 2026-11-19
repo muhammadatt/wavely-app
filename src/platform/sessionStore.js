@@ -125,6 +125,19 @@ export async function openSessionStore({ sessionId, nav = globalThis.navigator }
       await writeChunks([ROOT_DIR, 'sessions', `${sessionId}.${slot}.json`], one())
     },
 
+    /**
+     * Replace a gone tab's manifest with `manifest` (what is still to be
+     * restored after a partial restore). Written to slot a first and slot b
+     * removed after, so a write cut short leaves the old, whole manifest:
+     * the next restore may offer a file again, but never loses one.
+     */
+    async replaceManifest(otherSessionId, manifest) {
+      const bytes = new TextEncoder().encode(JSON.stringify(manifest)).buffer
+      async function* one() { yield bytes }
+      await writeChunks([ROOT_DIR, 'sessions', `${otherSessionId}.a.json`], one())
+      await sessionsDir.removeEntry(`${otherSessionId}.b.json`).catch(() => {})
+    },
+
     /** Every manifest on disk except this tab's, newest slot of each, with whether its tab is still open. */
     async otherManifests() {
       const held = new Set(((await nav.locks.query()).held ?? []).map(l => l.name))

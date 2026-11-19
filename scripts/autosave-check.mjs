@@ -46,7 +46,7 @@ writeWav(wav)
 
 let server = null
 if (!(await waitForServer(1000))) {
-  server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' })
+  server = spawn('node_modules/.bin/vite', ['--port', String(PORT), '--strictPort'], { stdio: 'ignore' })
   if (!(await waitForServer(40000))) { console.error('dev server did not start'); process.exit(1) }
 }
 
@@ -160,6 +160,71 @@ try {
   check(await page.locator('[data-testid=recovery]').count() === 0, 'Discard removes the offer')
   const afterDiscard = await storage()
   check(afterDiscard.sessions.length === 0 && afterDiscard.buffers.length === 0, `Discard empties the store (${afterDiscard.sessions.length} manifests, ${afterDiscard.buffers.length} buffers left)`)
+
+  // 5. A file whose original can no longer be read (replaced by a Save, moved)
+  //    must not stop the backup of the others, and is kept as samples instead.
+  const chooser2 = page.waitForEvent('filechooser')
+  await page.getByText('Choose audio files').click()
+  await (await chooser2).setFiles(wav)
+  await page.waitForTimeout(2500)
+  await page.locator('canvas.waveform-canvas').click({ position: { x: 5, y: 40 } })
+  await page.mouse.move(x(0.2), y); await page.mouse.down(); await page.mouse.move(x(0.4), y, { steps: 8 }); await page.mouse.up()
+  await page.keyboard.press('Delete')
+  await page.evaluate(async () => {
+    const { useEditorState } = await import('/src/composables/useEditorState.js')
+    const editor = useEditorState()
+    const ctx = editor.getAudioContext()
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate)
+    buffer.getChannelData(0).fill(0.25)
+    const gone = { name: 'Moved away.wav', type: 'audio/wav', size: 1000,
+      slice: () => ({ arrayBuffer: () => Promise.reject(new DOMException('The file changed on disk', 'NotReadableError')) }) }
+    editor.createDocument('Moved away.wav', buffer, { sourceFile: gone, unsaved: true, activate: false })
+  })
+  await page.waitForTimeout(3500)
+  const mixed = await storage()
+  const names = mixed.sessions.flatMap(m => m.files)
+  check(names.includes('wavely-autosave-check.wav') && names.includes('Moved away.wav'),
+    `an unreadable original does not stop the backup (${names.join(', ')})`)
+  check(mixed.buffers.some(b => b.name.endsWith('.bin')) && mixed.buffers.some(b => b.name.endsWith('.f32')),
+    'the readable file is kept as its bytes, the unreadable one as samples')
+
+  // 6. A file that fails to restore stays on offer, and what did restore is not offered again.
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForTimeout(800)
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory()
+    const dir = await (await root.getDirectoryHandle('wavely-autosave')).getDirectoryHandle('buffers')
+    for await (const [name, h] of dir.entries()) {
+      if (!name.endsWith('.bin')) continue
+      const w = await h.createWritable()
+      await w.write(new Uint8Array(64).fill(7))
+      await w.close()
+    }
+  })
+  toasts.length = 0
+  await page.locator('[data-testid=recovery]').getByRole('button', { name: 'Restore' }).click()
+  await page.waitForTimeout(3000)
+  check(toasts.some(t => /couldn't be restored and is still on offer/.test(t)), 'a failed file is reported as still on offer')
+  check(await page.locator('[role=tab]', { hasText: 'Moved away' }).count() === 1, 'the other file restored')
+  // Still on offer from the gone tab: only the file that failed. (After a
+  // reload the restored file would be offered again, rightly: it is now this
+  // tab's unsaved work.)
+  const pendingFiles = await page.evaluate(async () => {
+    const { useSessionAutosave } = await import('/src/composables/useSessionAutosave.js')
+    return useSessionAutosave().autosave.pending.flatMap(p => p.files)
+  })
+  check(pendingFiles.length === 1 && pendingFiles[0] === 'wavely-autosave-check.wav',
+    `what is left on offer is only the file that failed (${pendingFiles.join(', ')})`)
+  // Close the restored file, so the empty state shows the offer again.
+  await page.evaluate(async () => {
+    const { useEditorState } = await import('/src/composables/useEditorState.js')
+    const editor = useEditorState()
+    for (const d of [...editor.appState.documents]) editor.closeDocument(d.id)
+  })
+  await page.waitForTimeout(500)
+  await page.locator('[data-testid=recovery]').getByRole('button', { name: 'Discard' }).click()
+  await page.getByRole('button', { name: 'Discard for good' }).click()
+  await page.waitForTimeout(1500)
   check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`)
 } finally {
   await browser.close()

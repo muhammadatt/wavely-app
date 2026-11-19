@@ -79,7 +79,7 @@ test('session autosave can keep a file with no unsaved edits', () => {
 
 // ── Polling ──────────────────────────────────────────────────────────────────
 
-const networkDown = () => Object.assign(new TypeError('Failed to fetch'), {})
+const networkDown = () => Object.assign(new TypeError('Failed to fetch'), { networkError: true })
 
 test('polling rides out a dropped connection and carries on', async () => {
   const answers = [networkDown(), networkDown(), { status: 'processing' }, networkDown(), { status: 'done', report: 1 }]
@@ -97,6 +97,15 @@ test('polling gives up after too many network failures in a row', async () => {
     fetchStatus: async () => { calls++; throw networkDown() },
   }), /Failed to fetch/)
   assert.equal(calls, 4)
+})
+
+test('a bug in the status callback is not mistaken for a dropped connection', async () => {
+  let calls = 0
+  await assert.rejects(pollJob({
+    wait: async () => {},
+    fetchStatus: async () => { calls++; throw new TypeError('x is undefined') },
+  }), /x is undefined/)
+  assert.equal(calls, 1)
 })
 
 test('an error the server answered with is not retried', async () => {

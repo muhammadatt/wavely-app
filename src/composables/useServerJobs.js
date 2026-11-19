@@ -41,6 +41,9 @@ export const STORAGE_KEY = 'wavely:server-jobs'
 const LOCK_PREFIX = 'wavely-jobs:'
 const ADOPT_LOCK = 'wavely-jobs-adopt'
 const RESUME_POLL_MS = 3000
+const ADOPT_INTERVAL_MS = 60 * 1000
+/** Thrown into a resumed job's poll once the user stopped waiting for it. */
+const FORGOTTEN = Symbol('forgotten')
 // A resumed job may have been running for a while already; give it the
 // longest budget either client allows, rather than restarting the clock short.
 const RESUME_MAX_POLLS = 40 * 60
@@ -85,6 +88,16 @@ function removeRecord(jobId) {
   writeStore(readStore().filter(r => r.jobId !== jobId))
 }
 
+/**
+ * The open document a resumed result lands on: the one whose timeline, rate
+ * and channel count are what the job was sent. Null → it opens as a new file.
+ */
+export function landingDocument(record, documents) {
+  const doc = matchDocument(record, documents)
+  return doc && doc.currentFile?.sampleRate === record.sampleRate
+    && doc.currentFile?.channels === record.channels ? doc : null
+}
+
 export function useServerJobs() {
   /** Documents with a job of this tab's in flight: session autosave keeps them. */
   const pendingDocIds = computed(() => new Set(jobs.live.map(r => r.docId)))
@@ -103,14 +116,27 @@ export function useServerJobs() {
       })
     })
     tabId = id
-    // One tab at a time, so two tabs opened together do not both take a job.
+    await adoptOrphans()
+    // A tab that closes or crashes while this one stays open leaves its jobs
+    // behind too: look again whenever this page comes back, and now and then.
+    globalThis.document?.addEventListener?.('visibilitychange', () => {
+      if (globalThis.document.visibilityState === 'visible') adoptOrphans()
+    })
+    setInterval(adoptOrphans, ADOPT_INTERVAL_MS)
+  }
+
+  /** Take over the records of tabs that are gone. One tab at a time, so two never take the same job. */
+  async function adoptOrphans() {
+    const locks = globalThis.navigator?.locks
+    if (!tabId || !locks?.request) return
     await locks.request(ADOPT_LOCK, async () => {
       const held = new Set(((await locks.query()).held ?? []).map(l => l.name))
       const { orphaned, kept } = partitionRecords(readStore(), { isAlive: owner => held.has(LOCK_PREFIX + owner) })
+      if (orphaned.length === 0) return
       const adopted = orphaned.map(r => ({ ...r, owner: tabId }))
       writeStore([...kept, ...adopted])
       for (const r of adopted) resume(r)
-    })
+    }).catch(err => console.warn('Could not check for jobs left by other tabs:', err))
   }
 
   /**
@@ -143,6 +169,7 @@ export function useServerJobs() {
   function resume(record) {
     const entry = reactive({
       record, status: 'running', progress: null, queuePosition: null, error: null, report: null, busy: false,
+      forgotten: false,
     })
     jobs.resumed.push(entry)
     pollJob({
@@ -151,6 +178,7 @@ export function useServerJobs() {
       maxQueuePolls: RESUME_MAX_QUEUE_POLLS,
       onProgress: (p) => { entry.progress = p },
       fetchStatus: async () => {
+        if (entry.forgotten) throw FORGOTTEN
         const job = await fetchJobStatus(record.jobId)
         entry.queuePosition = job.queuePosition ?? null
         return job
@@ -158,7 +186,7 @@ export function useServerJobs() {
     }).then((job) => {
       entry.status = 'ready'
       entry.report = job.report ?? null
-    }).catch((err) => settleFailed(entry, err))
+    }).catch((err) => { if (err !== FORGOTTEN) settleFailed(entry, err) })
   }
 
   function settleFailed(entry, err) {
@@ -177,9 +205,7 @@ export function useServerJobs() {
     if (entry.status !== 'ready' || entry.busy) return
     const editor = useEditorState()
     const r = entry.record
-    const candidate = matchDocument(r, editor.appState.documents)
-    const doc = candidate && candidate.currentFile?.sampleRate === r.sampleRate
-      && candidate.currentFile?.channels === r.channels ? candidate : null
+    const doc = landingDocument(r, editor.appState.documents)
     if (doc?.isProcessing) {
       editor.showToast(`Wait for ${doc.name} to finish processing`)
       return
@@ -260,6 +286,7 @@ export function useServerJobs() {
 
   /** Stop offering a resumed job. One still running is left to finish and expire on the server. */
   function forget(entry) {
+    entry.forgotten = true
     const i = jobs.resumed.indexOf(entry)
     if (i >= 0) jobs.resumed.splice(i, 1)
     downloaded.delete(entry.record.jobId)

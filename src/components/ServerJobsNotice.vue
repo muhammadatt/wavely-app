@@ -5,9 +5,8 @@
  * server is done. Jobs this tab started itself show on the processing overlay
  * instead and never appear here.
  */
-import { useServerJobs } from '../composables/useServerJobs.js'
+import { useServerJobs, landingDocument } from '../composables/useServerJobs.js'
 import { useEditorState } from '../composables/useEditorState.js'
-import { matchDocument } from '../audio/serverJobRecord.js'
 
 const { jobs, applyResumed, forget } = useServerJobs()
 const { appState } = useEditorState()
@@ -21,7 +20,7 @@ function waitText(entry) {
 
 /** Whether Apply will land on the file (it is open with the timeline that was sent) or open a new one. */
 function landsOnFile(entry) {
-  return !!matchDocument(entry.record, appState.documents)
+  return !!landingDocument(entry.record, appState.documents)
 }
 </script>
 

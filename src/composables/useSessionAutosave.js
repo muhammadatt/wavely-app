@@ -48,6 +48,8 @@ const stored = new Map()
 /** Manifests of dead tabs awaiting Restore / Discard, by session id. */
 const pendingManifests = new Map()
 let wroteManifest = false
+/** Buffers that could not be stored this visit: skipped, so they never block the rest. */
+const unwritable = new Set()
 let timer = null
 let running = null
 let again = false
@@ -113,13 +115,16 @@ export function useSessionAutosave() {
       for (let pass = 0; pass < 5; pass++) {
         const needed = [...bufferIdsOf(appState.documents.filter(keep))].filter(id => !stored.has(id))
         if (needed.length === 0) break
+        let wrote = false
         for (const id of needed) {
-          const buffer = editor.bufferPool.get(id)
-          if (!buffer) continue
-          const file = editor.getBufferSourceFile(id)
-          stored.set(id, file ? await store.writeSourceFile(id, file) : await store.writePcm(id, buffer))
+          if (unwritable.has(id)) continue
+          const meta = await storeBuffer(id)
+          if (!meta) continue
+          stored.set(id, meta)
+          wrote = true
           if (stored.size === 1) navigator.storage.persist?.().catch(() => {})
         }
+        if (!wrote) break
       }
       const manifest = buildManifest({
         sessionId: store.sessionId,
@@ -142,6 +147,38 @@ export function useSessionAutosave() {
       } else {
         console.warn('Session autosave failed:', err)
       }
+    }
+  }
+
+  /**
+   * Write one buffer: the opened file's own bytes when there are any, else the
+   * decoded samples. A source file that can no longer be read — replaced by a
+   * Save, moved or deleted on disk, or a restored file whose stored copy the
+   * clean-up removed — is forgotten and the samples stored instead. A buffer
+   * that cannot be stored at all is skipped for this visit, so it never holds
+   * up the other files' recovery point. A full disk still stops autosave.
+   * Resolves the buffer's description, or null when it was skipped.
+   */
+  async function storeBuffer(id) {
+    const buffer = editor.bufferPool.get(id)
+    if (!buffer) return null
+    const file = editor.getBufferSourceFile(id)
+    if (file) {
+      try {
+        return await store.writeSourceFile(id, file)
+      } catch (err) {
+        if (err?.name === 'QuotaExceededError') throw err
+        console.warn(`Couldn't read the original of buffer ${id}; storing its samples instead:`, err)
+        editor.forgetBufferSourceFile(id)
+      }
+    }
+    try {
+      return await store.writePcm(id, buffer)
+    } catch (err) {
+      if (err?.name === 'QuotaExceededError') throw err
+      console.warn(`Couldn't back up buffer ${id}:`, err)
+      unwritable.add(id)
+      return null
     }
   }
 
@@ -198,18 +235,20 @@ export function useSessionAutosave() {
     const budget = memoryBudget()
     const mobile = isMobileDevice()
     const loaded = new Map()
-    const done = []
+    /** sessionId → the snapshots still to restore (what failed or did not fit). */
+    const leftover = new Map()
     let restored = 0
+    let failed = 0
     let firstDocId = null
     let stoppedForMemory = false
     try {
       for (const [sessionId, manifest] of pendingManifests) {
-        let complete = true
+        const left = []
         for (const snapshot of manifest.docs) {
-          if (mobile && editor.poolBytes.value > budget * 0.9) {
+          if (stoppedForMemory || (mobile && editor.poolBytes.value > budget * 0.9)) {
             stoppedForMemory = true
-            complete = false
-            break
+            left.push(snapshot)
+            continue
           }
           try {
             const buffers = new Map()
@@ -219,30 +258,49 @@ export function useSessionAutosave() {
               const r = loaded.get(id)
               buffers.set(id, r.buffer)
               if (r.sourceFile) sourceFiles.set(id, r.sourceFile)
-              // Already on disk: this tab adopts it rather than writing it again.
-              stored.set(id, manifest.buffers[id])
             }
             const docId = editor.restoreDocument(snapshot, buffers, { sourceFiles })
+            // Already on disk: this tab adopts its buffers rather than writing them again.
+            for (const id of buffers.keys()) stored.set(id, manifest.buffers[id])
             firstDocId ??= docId
             restored++
             for (const [id, buffer] of buffers) {
               if (!editor.getPeakCache(id)) editor.setPeakCache(id, await computePeakCache(buffer, BASE_SAMPLES_PER_PX))
             }
           } catch (err) {
+            // Kept on offer: this may be the only copy, and the failure may pass
+            // (memory, a busy disk). Discard is how the user lets it go.
             console.warn(`Couldn't restore ${snapshot.name}:`, err)
-            editor.showToast(`Couldn't restore ${snapshot.name}`, 6000, { tone: 'warn' })
+            failed++
+            left.push(snapshot)
           }
         }
-        if (complete) done.push(sessionId)
+        leftover.set(sessionId, left)
       }
       if (firstDocId) editor.setActiveDocument(firstDocId)
-      // Name the restored buffers in this tab's manifest BEFORE dropping the old
-      // ones, so the clean-up never sees them unreferenced.
+      // Name the restored buffers in this tab's manifest BEFORE the old
+      // manifests change, so the clean-up never sees them unreferenced.
       await flushNow()
-      for (const sessionId of done) await store.deleteManifests(sessionId)
+      for (const [sessionId, left] of leftover) {
+        if (left.length === 0) {
+          await store.deleteManifests(sessionId)
+          continue
+        }
+        // Offer only what is still to restore, so the next Restore never opens
+        // a file twice. Its buffers stay named, so the clean-up leaves them.
+        const old = pendingManifests.get(sessionId)
+        const buffers = {}
+        for (const id of bufferIdsOf(left)) buffers[id] = old.buffers[id]
+        await store.replaceManifest(sessionId, { ...old, savedAt: Date.now(), docs: left, buffers })
+      }
       await refreshPending()
       if (stoppedForMemory) {
         editor.showToast('Some files were not restored: this device is low on memory. Close a file, then restore the rest.', 10000, { tone: 'warn' })
+      } else if (failed > 0) {
+        editor.showToast(
+          `${failed === 1 ? '1 file' : `${failed} files`} couldn't be restored and ${failed === 1 ? 'is' : 'are'} still on offer. Try again, or discard ${failed === 1 ? 'it' : 'them'}.`,
+          10000, { tone: 'warn' },
+        )
       } else if (restored > 0) {
         editor.showToast(restored === 1 ? 'Restored 1 file' : `Restored ${restored} files`)
       }
