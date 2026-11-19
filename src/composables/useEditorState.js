@@ -18,6 +18,7 @@ import { getDefaultOutputProfile, isOutputProfileLocked } from '../audio/presets
 import { createAudioContext, onContextStopped, resumeIfStopped } from '../platform/audioSession.js'
 import { bufferBytes, memoryBudget } from '../platform/memoryBudget.js'
 import { historyTrim, segmentBufferIds, unreferencedBufferIds } from '../audio/historyBudget.js'
+import { restoreSegments } from '../audio/sessionSnapshot.js'
 
 const UNDO_STACK_CAP = 50
 
@@ -124,7 +125,15 @@ function poolDelete(id) {
   if (!prev) return
   poolBytes.value -= bufferBytes(prev)
   bufferPool.delete(id)
+  bufferSourceFiles.delete(id)
 }
+
+// Map<bufferId, File> — the file an opened document's original buffer was
+// decoded from. Session autosave stores these bytes rather than the decoded
+// samples (a WAV is half their size, an MP3 a tenth) and decodes them again on
+// restore. A File from a picker or a drop is backed by the disk, so holding it
+// costs nothing.
+const bufferSourceFiles = new Map()
 
 // Peak caches — Map<bufferId, { samplesPerPx, peaks }>
 const peakCaches = new Map()
@@ -557,12 +566,13 @@ export function useEditorState() {
    * Create a document from a decoded buffer and make it active.
    * @returns {{ docId: string, bufferId: string }}
    */
-  function createDocument(name, audioBuffer, { activate = true, sourceFormat = null, sourceHandle = null } = {}) {
+  function createDocument(name, audioBuffer, { activate = true, sourceFormat = null, sourceHandle = null, sourceFile = null } = {}) {
     const doc = makeDocument(name, audioBuffer, sourceFormat)
     if (sourceHandle) docSourceHandles.set(doc.id, sourceHandle)
     appState.documents.push(doc)
 
     poolSet(doc.bufferId, audioBuffer)
+    if (sourceFile) bufferSourceFiles.set(doc.bufferId, sourceFile)
     buffersFor(doc.id).add(doc.bufferId)
     historyFor(doc.id)
 
@@ -572,6 +582,49 @@ export function useEditorState() {
 
   function getDocument(docId) {
     return appState.documents.find(d => d.id === docId) ?? null
+  }
+
+  /**
+   * Re-open a document session autosave kept (sessionSnapshot.js): its
+   * timeline over buffers loaded back from storage. It opens UNSAVED — its
+   * edits were never written to disk — with a fresh, empty undo history, and
+   * with no source file handle, so its first Save asks where to write.
+   *
+   * @param {object} snapshot  one of a manifest's `docs`
+   * @param {Map<string, AudioBuffer>} buffers  every buffer its segments use
+   * @param {{ sourceFiles?: Map<string, File>, activate?: boolean }} [opts]
+   */
+  function restoreDocument(snapshot, buffers, { sourceFiles = new Map(), activate = false } = {}) {
+    const segments = restoreSegments(snapshot, buffers)
+    const first = segments.find(s => s.sourceBuffer) ?? null
+    const doc = makeDocument(snapshot.name, first?.sourceBuffer ?? { duration: 0, sampleRate: 44100, numberOfChannels: 1 }, snapshot.sourceFormat)
+    doc.bufferId = first?.sourceBufferId ?? doc.bufferId
+    doc.segments = segments
+    doc.currentFile.duration = getTimelineDuration(segments)
+    doc.selection = snapshot.selection
+    doc.playhead = Math.min(snapshot.playhead ?? 0, doc.currentFile.duration)
+    if (snapshot.selectedPreset) doc.selectedPreset = snapshot.selectedPreset
+    if (snapshot.selectedOutputProfile) doc.selectedOutputProfile = snapshot.selectedOutputProfile
+    // Unsaved: these edits exist nowhere on disk.
+    doc.revision = ++revisionSeq
+    doc.savedRevision = -1
+    appState.documents.push(doc)
+
+    const owned = buffersFor(doc.id)
+    for (const [id, buffer] of buffers) {
+      if (!segments.some(s => s.sourceBufferId === id)) continue
+      poolSet(id, buffer)
+      owned.add(id)
+      if (sourceFiles.has(id)) bufferSourceFiles.set(id, sourceFiles.get(id))
+    }
+    historyFor(doc.id)
+    if (activate) setActiveDocument(doc.id)
+    return doc.id
+  }
+
+  /** The file a buffer was decoded from, when it came straight from one (see bufferSourceFiles). */
+  function getBufferSourceFile(bufferId) {
+    return bufferSourceFiles.get(bufferId) ?? null
   }
 
   function setActiveDocument(docId) {
@@ -1075,6 +1128,8 @@ export function useEditorState() {
 
     // Documents
     createDocument,
+    restoreDocument,
+    getBufferSourceFile,
     getDocument,
     pinActiveDocument,
     setActiveDocument,

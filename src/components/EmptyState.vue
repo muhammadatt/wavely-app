@@ -1,6 +1,8 @@
 <script setup>
 import { useFileImport } from '../composables/useFileImport.js'
+import { ref } from 'vue'
 import { useTryOut } from '../composables/useTryOut.js'
+import { useSessionAutosave } from '../composables/useSessionAutosave.js'
 import BaseButton from './ui/BaseButton.vue'
 
 // Drag-drop is handled once at the workspace level in EditorScreen so files can
@@ -9,6 +11,23 @@ import BaseButton from './ui/BaseButton.vue'
 const { promptForFiles, isImporting, importProgress } = useFileImport()
 // Arrived from a marketing page's "Try it on this clip" (see useTryOut).
 const { tryOut, start: startTryOut, dismiss: dismissTryOut } = useTryOut()
+// Work a closed or crashed tab left behind (see useSessionAutosave).
+const { autosave, restore, discard } = useSessionAutosave()
+// Discarding deletes the only copy, so it takes a second, explicit click.
+const confirmingDiscard = ref(false)
+
+function recoveryFiles() {
+  return autosave.pending.flatMap(p => p.files)
+}
+
+function savedAgo(ms) {
+  const minutes = Math.round((Date.now() - ms) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  return new Date(ms).toLocaleDateString()
+}
 </script>
 
 <template>
@@ -39,6 +58,30 @@ const { tryOut, start: startTryOut, dismiss: dismissTryOut } = useTryOut()
             :style="{ width: `${(importProgress.done / importProgress.total) * 100}%` }"
           ></div>
           <div v-else class="h-full rounded-full animate-pulse w-2/3" style="background:#35d3e6"></div>
+        </div>
+      </div>
+
+      <!-- Unsaved work from a tab that closed or crashed. Before the try-out:
+           the user's own work outranks a demo clip. -->
+      <div v-else-if="autosave.pending.length" class="try" data-testid="recovery" @click.stop>
+        <div class="try-eyebrow">Unsaved work</div>
+        <div class="try-title">
+          Restore {{ recoveryFiles().length === 1 ? '1 file' : `${recoveryFiles().length} files` }} from your last session?
+        </div>
+        <div class="try-setting">Last backed up {{ savedAgo(autosave.pending[0].savedAt) }}</div>
+        <ul class="recovery-files">
+          <li v-for="(name, i) in recoveryFiles().slice(0, 5)" :key="i">{{ name }}</li>
+          <li v-if="recoveryFiles().length > 5">and {{ recoveryFiles().length - 5 }} more</li>
+        </ul>
+        <BaseButton size="md" class="w-full mt-4" :disabled="autosave.restoring" @click="restore()">
+          {{ autosave.restoring ? 'Restoring…' : 'Restore' }}
+        </BaseButton>
+        <p class="try-note">Your edits come back as unsaved files. Undo history is not restored.</p>
+        <button v-if="!confirmingDiscard" type="button" class="try-own" :disabled="autosave.restoring" @click="confirmingDiscard = true">Discard</button>
+        <div v-else class="recovery-confirm">
+          <span>This deletes the only copy.</span>
+          <button type="button" class="try-own danger" @click="discard(); confirmingDiscard = false">Discard for good</button>
+          <button type="button" class="try-own" @click="confirmingDiscard = false">Keep</button>
         </div>
       </div>
 
@@ -101,4 +144,28 @@ const { tryOut, start: startTryOut, dismiss: dismissTryOut } = useTryOut()
   cursor: pointer;
 }
 .try-own:hover { color: #eaf6f8; }
+.try-own.danger { color: #ff8a80; }
+.recovery-files {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255,255,255,.7);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.recovery-confirm {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: rgba(255,255,255,.55);
+}
+.recovery-confirm .try-own { margin-top: 0; }
 </style>

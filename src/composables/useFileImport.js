@@ -124,6 +124,8 @@ export function useFileImport() {
           activate: activateFirst && createdIds.length === 0,
           sourceFormat,
           sourceHandle: handle ?? null,
+          // Kept so session autosave can store the file's bytes, not its decoded samples.
+          sourceFile: file,
         })
         createdIds.push(docId)
 
