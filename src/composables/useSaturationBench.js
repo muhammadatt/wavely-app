@@ -343,3 +343,7 @@ const copies = pluginCopies((copy, life) => {
 export function useSaturationBench(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useSaturationBench.builtCopies = () => copies.built()
+useSaturationBench.copySerial = copy => copies.serial(copy)

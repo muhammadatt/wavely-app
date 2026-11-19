@@ -114,6 +114,10 @@ export function useManualEq(copy) {
   return copies(copy)()
 }
 
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useManualEq.builtCopies = () => copies.built()
+useManualEq.copySerial = copy => copies.serial(copy)
+
 /**
  * Take a set of bands from elsewhere and open the window on them.
  *

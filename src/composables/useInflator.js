@@ -240,3 +240,7 @@ const copies = pluginCopies((copy, life) => {
 export function useInflator(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useInflator.builtCopies = () => copies.built()
+useInflator.copySerial = copy => copies.serial(copy)

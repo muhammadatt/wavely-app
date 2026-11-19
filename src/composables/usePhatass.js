@@ -668,3 +668,7 @@ const copies = pluginCopies((copy, life) => {
 export function usePhatass(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+usePhatass.builtCopies = () => copies.built()
+usePhatass.copySerial = copy => copies.serial(copy)

@@ -4,6 +4,7 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
 import { useFileSave } from '../composables/useFileSave.js'
 import { useWindows } from '../composables/useWindows.js'
+import { installPerFilePluginSettings } from '../composables/perFilePluginSettings.js'
 import TopBar from './TopBar.vue'
 import FileTabs from './FileTabs.vue'
 import FloatingToolbar from './FloatingToolbar.vue'
@@ -26,6 +27,7 @@ const {
   documents, cycleDocument, setActiveDocument, closeDocument,
   documentHasUnsavedWork, anyUnsavedWork, activeDoc,
 } = useEditorState()
+installPerFilePluginSettings()
 const { importDataTransfer, promptForFiles } = useFileImport()
 const { saveDocument, saveDocumentAs } = useFileSave()
 const { closeTopWindow, anyWindowOpen } = useWindows()

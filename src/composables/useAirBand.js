@@ -200,3 +200,7 @@ const copies = pluginCopies((copy, life) => {
 export function useAirBand(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useAirBand.builtCopies = () => copies.built()
+useAirBand.copySerial = copy => copies.serial(copy)

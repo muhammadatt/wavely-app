@@ -710,3 +710,7 @@ const copies = pluginCopies((copy, life) => {
 export function useFET1176(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useFET1176.builtCopies = () => copies.built()
+useFET1176.copySerial = copy => copies.serial(copy)

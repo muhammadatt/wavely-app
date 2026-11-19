@@ -773,3 +773,7 @@ const copies = pluginCopies((copy, life) => {
 export function useLA2A(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useLA2A.builtCopies = () => copies.built()
+useLA2A.copySerial = copy => copies.serial(copy)

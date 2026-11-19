@@ -814,3 +814,7 @@ const copies = pluginCopies((copy, life) => {
 export function useSoftClipper(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useSoftClipper.builtCopies = () => copies.built()
+useSoftClipper.copySerial = copy => copies.serial(copy)

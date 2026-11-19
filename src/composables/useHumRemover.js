@@ -325,3 +325,7 @@ const copies = pluginCopies((copy, life) => {
 export function useHumRemover(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useHumRemover.builtCopies = () => copies.built()
+useHumRemover.copySerial = copy => copies.serial(copy)

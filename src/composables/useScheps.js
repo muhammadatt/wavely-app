@@ -549,3 +549,7 @@ const copies = pluginCopies((copy, life) => {
 export function useScheps(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useScheps.builtCopies = () => copies.built()
+useScheps.copySerial = copy => copies.serial(copy)
