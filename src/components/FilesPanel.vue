@@ -11,6 +11,8 @@ import { exportSettingsFor } from '../audio/exportPlan.js'
 import { FORMATS } from '../audio/saveFormat.js'
 import { focusRenameInput } from '../utils/renameInput.js'
 import WaveformThumbnail from './WaveformThumbnail.vue'
+import { DEV_TUNING_PANELS } from '../devFlags.js'
+import { formatBytes, memoryBudget } from '../platform/memoryBudget.js'
 import BaseButton from './ui/BaseButton.vue'
 
 /**
@@ -55,8 +57,17 @@ import BaseButton from './ui/BaseButton.vue'
 
 const {
   appState, documents, setActiveDocument, closeDocument, closeDocuments,
-  documentHasUnsavedWork, renameDocument,
+  documentHasUnsavedWork, renameDocument, poolBytes,
 } = useEditorState()
+
+// Dev builds only: decoded audio held in memory against this device's budget
+// (memoryBudget.js), so a session that is creeping toward a phone's limit
+// shows it before the tab dies. Apply outputs stay in the pool until their
+// file closes, so this climbs with every apply.
+const showMemory = DEV_TUNING_PANELS
+const memoryBudgetBytes = memoryBudget()
+const memoryReadout = computed(() =>
+  `${formatBytes(poolBytes.value)} of ${formatBytes(memoryBudgetBytes)}`)
 const { promptForFiles } = useFileImport()
 const { saveDocument, saveDocumentAs, isSaving } = useFileSave()
 const {
@@ -460,6 +471,12 @@ watch(documents, docs => { if (docs.length === 0) close() })
             <svg viewBox="0 0 24 24" class="w-[13px] h-[13px] fill-none stroke-current" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
             Import
           </BaseButton>
+          <span
+            v-if="showMemory"
+            class="text-[11px] font-semibold text-[rgba(255,255,255,.35)] font-['JetBrains_Mono']"
+            title="Decoded audio in memory, against this device's budget (dev builds only)"
+            data-testid="memory-readout"
+          >Memory {{ memoryReadout }}</span>
 
           <div class="flex-1"></div>
 

@@ -1,4 +1,4 @@
-import { reactive, computed, ref } from 'vue'
+import { reactive, computed, ref, readonly } from 'vue'
 import { v4 as uuidv4 } from 'uuid'
 import {
   cloneSegments,
@@ -16,6 +16,7 @@ import {
 import { stopPlayback } from '../audio/playback.js'
 import { getDefaultOutputProfile, isOutputProfileLocked } from '../audio/presets.js'
 import { createAudioContext, onContextStopped, resumeIfStopped } from '../platform/audioSession.js'
+import { bufferBytes } from '../platform/memoryBudget.js'
 
 const UNDO_STACK_CAP = 50
 
@@ -102,6 +103,27 @@ const appState = reactive({
 // documents; ownership is tracked separately so closing a document can free
 // the buffers no other document still references.
 const bufferPool = new Map()
+
+// Bytes of decoded audio in the pool, kept in step by poolSet / poolDelete —
+// the ONLY ways the pool changes. Read by the import check (memoryBudget.js)
+// before a file is decoded; a phone's tab is killed, not warned, when it runs
+// out. ⚠ Today a buffer leaves the pool only when its document closes: an
+// apply's output stays even after undo has dropped every step that used it.
+const poolBytes = ref(0)
+
+function poolSet(id, buffer) {
+  const prev = bufferPool.get(id)
+  if (prev === buffer) return
+  poolBytes.value += bufferBytes(buffer) - bufferBytes(prev)
+  bufferPool.set(id, buffer)
+}
+
+function poolDelete(id) {
+  const prev = bufferPool.get(id)
+  if (!prev) return
+  poolBytes.value -= bufferBytes(prev)
+  bufferPool.delete(id)
+}
 
 // Peak caches — Map<bufferId, { samplesPerPx, peaks }>
 const peakCaches = new Map()
@@ -377,7 +399,7 @@ export function useEditorState() {
    * document). Ownership decides who can free it on close.
    */
   function addBuffer(id, buffer, docId = appState.activeDocumentId) {
-    bufferPool.set(id, buffer)
+    poolSet(id, buffer)
     if (docId) buffersFor(docId).add(id)
   }
 
@@ -455,7 +477,7 @@ export function useEditorState() {
     if (sourceHandle) docSourceHandles.set(doc.id, sourceHandle)
     appState.documents.push(doc)
 
-    bufferPool.set(doc.bufferId, audioBuffer)
+    poolSet(doc.bufferId, audioBuffer)
     buffersFor(doc.id).add(doc.bufferId)
     historyFor(doc.id)
 
@@ -545,7 +567,7 @@ export function useEditorState() {
           if (otherDocId !== docId && set.has(bufferId)) { stillUsed = true; break }
         }
         if (!stillUsed) {
-          bufferPool.delete(bufferId)
+          poolDelete(bufferId)
           peakCaches.delete(bufferId)
         }
       }
@@ -715,7 +737,7 @@ export function useEditorState() {
       if (!seg.sourceBufferId) continue
       owned.add(seg.sourceBufferId)
       if (!bufferPool.has(seg.sourceBufferId) && seg.sourceBuffer) {
-        bufferPool.set(seg.sourceBufferId, seg.sourceBuffer)
+        poolSet(seg.sourceBufferId, seg.sourceBuffer)
       }
     }
     state.segments = insertSegments(state.segments, position, appState.clipboard)
@@ -918,9 +940,10 @@ export function useEditorState() {
 
   // ── Toast ──────────────────────────────────────────────────────────────────
   let toastId = 0
-  function showToast(message, duration = 3000) {
+  /** `tone: 'warn'` shows a warning icon instead of the tick. */
+  function showToast(message, duration = 3000, { tone = 'ok' } = {}) {
     const id = ++toastId
-    appState.toasts.push({ id, message })
+    appState.toasts.push({ id, message, tone })
     setTimeout(() => {
       appState.toasts = appState.toasts.filter(t => t.id !== id)
     }, duration)
@@ -931,6 +954,8 @@ export function useEditorState() {
     appState,
     bufferPool,
     peakCaches,
+    /** Bytes of decoded audio held by every open document (read-only). */
+    poolBytes: readonly(poolBytes),
 
     // Computed
     totalDuration,
