@@ -1,7 +1,7 @@
 import { getSegmentDuration } from './operations.js'
 import { applyGainSegments } from './dsp/autoLevel.js'
 import { playedSampleCount } from './dsp/fade.js'
-import { analysisWindow, analysedWholeRegion, regionPeakDb } from './analysisWindow.js'
+import { analysisWindow, analysedWholeRegion, regionPeakDb, voiceProfileSpans, concatChannelParts } from './analysisWindow.js'
 import { ensureLA2AWorklet } from './la2aWorkletLoader.js'
 import { LA2A_PREROLL_S } from './la2aProcessor.js'
 // ⚠ From the PROCESSOR, not the effect wrapper — the wrapper pulls the worklet
@@ -715,6 +715,18 @@ export function computeVoxPressorMeasure(segments, start, end, kernelParams, sam
 }
 
 /**
+ * VoxPressor's knob guides (`measureVoxPressorGuides`) on the same capped
+ * window as `computeVoxPressorMeasure`. Ask it right after a measurement with
+ * the same kernel params: the worker then reuses that measurement's Peaks →
+ * Body render, and the guides cost only their own searches.
+ */
+export function computeVoxPressorGuides(segments, start, end, kernelParams, sampleRate, channels) {
+  return measureInWorker(
+    'voxPressorGuides', segments, start, end, kernelParams, sampleRate, channels,
+  ).then(({ type, ...d }) => d)
+}
+
+/**
  * VoxPressor's per-stage peak restores, measured EXACTLY over the whole region
  * — for a region longer than the solve's analysis window. Resolves the solved
  * params with the restores, ceilings and Body offset corrected. See
@@ -757,6 +769,26 @@ export function computeSoftClipperCeiling(segments, start, end, percentile, samp
 export function computeVoiceProfile(segments, start, end, sampleRate, channels) {
   return measureInWorker('voiceProfile', segments, start, end, {}, sampleRate, channels)
     .then(d => d.profile ?? null)
+}
+
+/**
+ * The speaker's voice profile for a whole timeline span, measured on a SPREAD
+ * EXCERPT (`voiceProfileSpans`: 15 s in 5 blocks) rather than a region's first
+ * 30 s — VoxPressor measures it once per file version, not per selection.
+ * Resolves `{ cornerHz, voiceF0Hz }`, both null when there is no pitched
+ * material to measure (VoxPressor's own "unmeasurable").
+ */
+export function computeVoiceProfileSampled(segments, start, end, sampleRate, channels) {
+  const parts = voiceProfileSpans(start, end).map(w => renderRegionToBuffer(segments, w.start, w.end, sampleRate, channels))
+  const channelData = concatChannelParts(parts, parts[0]?.length ?? channels)
+  return new Promise((resolve, reject) => {
+    const id = ++measureSeq
+    measurePending.set(id, { resolve, reject })
+    getMeasureWorker().postMessage(
+      { __id: id, type: 'voiceProfile', channelData, sampleRate, params: {} },
+      channelData.map(c => c.buffer)
+    )
+  }).then(d => ({ cornerHz: d.profile?.cornerHz ?? null, voiceF0Hz: d.profile?.medianF0Hz ?? null }))
 }
 
 /** The whole worklet chain's delay: the plugin's own plus every stage's. */

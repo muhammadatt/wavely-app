@@ -5,9 +5,11 @@ import { registerChainPlugin } from './usePluginChain.js'
 import { useEntitlements } from './useEntitlements.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
-  applyVoxPressorRegion, computeVoxPressorMeasure, computeVoxPressorExact, computePeakCache,
+  applyVoxPressorRegion, computeVoxPressorMeasure, computeVoxPressorGuides, computeVoxPressorExact, computePeakCache,
+  computeVoiceProfileSampled,
 } from '../audio/processing.js'
 import { analysedWholeRegion, regionAlignDb } from '../audio/analysisWindow.js'
+import { createVoiceProfileCache } from '../audio/voiceProfileCache.js'
 import { getSegmentDuration } from '../audio/operations.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import {
@@ -131,9 +133,22 @@ const copies = pluginCopies((copy, life) => {
   const voxOutputLevels = ref([])
   let meterId = null
 
-  // The corner is a property of the material, not of the knobs: measured with
-  // the first measurement on a region and handed back to every later one.
-  let cornerFor = null
+  /**
+   * The voice's corner and median F0 are properties of the SPEAKER: measured
+   * once per file version on a spread excerpt of the whole timeline
+   * (`computeVoiceProfileSampled`) and handed to every measurement. They were
+   * measured per SELECTION, inside the measurement (~1 s of a ~4 s cold one on
+   * 30 s of narration), so every new selection paid for them again.
+   */
+  const voiceProfiles = createVoiceProfileCache()
+  /**
+   * The newest guide request (`solveGuides`). A guide is kept unless a NEWER
+   * guide request exists or the preview region moved — never dropped merely
+   * because a measurement started since, which during a drag was always.
+   */
+  let guideSeq = 0
+  /** The region the last full measurement was of (the two-pass rule in `solve`). */
+  let measuredRegion = null
   /** The Parallel compressor the last measured `parallelMakeupDb` belongs to (its warm start). */
   let parallelGuessComp = null
   /** Which (timeline, selection, knobs) the measured values belong to. */
@@ -179,6 +194,7 @@ const copies = pluginCopies((copy, life) => {
   life.onDispose(() => {
     solveThrottle?.cancel()
     solveSeq++
+    guideSeq++
   })
 
   let following = false
@@ -257,6 +273,13 @@ const copies = pluginCopies((copy, life) => {
         ? `${appState.activeDocumentId}:${state.revision}` : `${appState.activeDocumentId}:chain`
     }
 
+    /** Where `segments` end, seconds: the whole timeline's span. */
+    function timelineEnd(segments) {
+      return segments === state.segments
+        ? totalDuration.value
+        : segments.reduce((t, seg) => Math.max(t, seg.outputStart + getSegmentDuration(seg)), 0)
+    }
+
     /**
      * The file's alignment, over the WHOLE timeline (LA Vintage 2A's and LA
      * Classic 76's contract: one operating point for the whole file, whatever
@@ -266,14 +289,40 @@ const copies = pluginCopies((copy, life) => {
     function ensureAlignment(segments) {
       const key = timelineKey(segments)
       if (alignedFor === key && segments === state.segments) return
-      const end = segments === state.segments
-        ? totalDuration.value
-        : segments.reduce((t, seg) => Math.max(t, seg.outputStart + getSegmentDuration(seg)), 0)
+      const end = timelineEnd(segments)
       if (!(end > 0)) return
       const db = regionAlignDb(segments, 0, end, state.currentFile.sampleRate, state.currentFile.channels)
       alignedFor = key
       voxAlignDb.value = db
       pushParam('alignDb', db)
+    }
+
+    /**
+     * The voice profile ({ cornerHz, voiceF0Hz }) for `segments`: cached per
+     * document version, shared while in flight. A chain's running segments
+     * are measured every time, as their alignment is.
+     */
+    function ensureVoiceProfile(segments) {
+      const key = timelineKey(segments)
+      const own = segments === state.segments
+      const { sampleRate, channels } = state.currentFile
+      const measure = () => {
+        const end = timelineEnd(segments)
+        return end > 0
+          ? computeVoiceProfileSampled(segments, 0, end, sampleRate, channels)
+          : { cornerHz: null, voiceF0Hz: null }
+      }
+      const promise = voiceProfiles.get(key, measure, own)
+      if (own) {
+        promise.then(prof => {
+          // Into the live params at once, ahead of the measurement that uses it.
+          if (!voiceProfiles.holds(promise) || timelineKey(state.segments) !== key) return
+          voxMeasured.value = { ...voxMeasured.value, ...prof }
+          pushParam('cornerHz', prof.cornerHz)
+          pushParam('voiceF0Hz', prof.voiceF0Hz)
+        }, () => {})
+      }
+      return promise
     }
 
     /** The key a measurement belongs to: the timeline, the region and every setting it reads. */
@@ -297,14 +346,19 @@ const copies = pluginCopies((copy, life) => {
       const pKnobs = peaksKnobs()
       const peaksKey = `${regionKey}|${pKnobs}`
       voxPendingPeaksKey.value = peaksKey
+      // ⚠ THE KNOBS ARE READ HERE, WITH THE KEYS, NOT AFTER THE AWAIT BELOW.
+      // Read after it, a knob moved while the voice profile was measured was
+      // measured under the OLD knob's key, and moved back before the trailing
+      // measurement landed, `prepareApply` found `solvedFor` matching and
+      // applied makeups measured at the wrong setting.
+      const knobs = toKernelParams(currentParams())
       voxBusy.value = true
       try {
-        const kp = toKernelParams(currentParams())
-        // A new region measures its own voice: corner and F0 together.
-        if (cornerFor !== regionKey) {
-          delete kp.cornerHz
-          delete kp.voiceF0Hz
-        }
+        const profile = await ensureVoiceProfile(segments)
+        if (seq !== solveSeq) return null
+        // `owner`: the solver keeps one cache set per copy, so two VoxPressor
+        // copies measuring in turn never evict each other's entries.
+        const kp = { ...knobs, cornerHz: profile.cornerHz, voiceF0Hz: profile.voiceF0Hz, owner: windowId }
         // The LA-2A stage's makeup solve starts from the last answer, so a
         // knob move usually converges in one render.
         if (Number.isFinite(voxMeasured.value.bodyMakeupDb)) kp.bodyMakeupGuess = voxMeasured.value.bodyMakeupDb
@@ -327,11 +381,11 @@ const copies = pluginCopies((copy, life) => {
          * Parallel — which follow Body's output — are re-solved (another
          * ~1.6 s). A single pass left the Body knob sounding dead for 2.5 s:
          * the compression moved at once and its makeup trailed it.
-         * ⚠ Not on a new region: there the first pass measures the voice's
-         * corner and F0, which the second would have to be handed and would
-         * then key differently, measuring Body twice.
+         * Not on a new region (one pass there). That rule dates from when the
+         * first pass measured the voice's corner and F0; the profile is now
+         * measured ahead, so two passes would work there too.
          */
-        if (guide && cornerFor === regionKey && voxReadout.value?.upKey !== upKey) {
+        if (guide && measuredRegion === regionKey && voxReadout.value?.upKey !== upKey) {
           const r1 = await computeVoxPressorMeasure(
             segments, start, end, { ...kp, measureUntil: 'body' }, state.currentFile.sampleRate, state.currentFile.channels,
           )
@@ -353,7 +407,7 @@ const copies = pluginCopies((copy, life) => {
           segments, start, end, kp, state.currentFile.sampleRate, state.currentFile.channels,
         )
         if (seq !== solveSeq) return null
-        cornerFor = regionKey
+        measuredRegion = regionKey
         parallelGuessComp = kp.parallelComp
         const next = {}
         for (const k of MEASURED) next[k] = r[k] ?? null
@@ -364,15 +418,44 @@ const copies = pluginCopies((copy, life) => {
           upKey, upKnobs, peaksKey, peaksKnobs: pKnobs,
         }
         solvedFor = key
-        if (guide) {
-          voxPeaksGuide.value = peaksGuideKnobs(r.peaksGuide)
-          voxBodyGuide.value = bodyGuideKnobs(r.bodyGuide)
-          followGuide()
-        }
+        // The rings after the readouts: their own worker call, so a new
+        // region's figures are not held back by the guides' searches.
+        if (guide) solveGuides(segments, start, end, kp)
         return next
       } finally {
         if (seq === solveSeq) voxBusy.value = false
       }
+    }
+
+    /**
+     * The Peaks and Body rings (`measureVoxPressorGuides`), asked right after
+     * a measurement with the same params, so the worker reuses its Peaks →
+     * Body render. Not awaited by `solve`, so it never holds `voxBusy` (the
+     * readouts' "measuring…").
+     *
+     * ⚠ KEPT UNLESS A NEWER GUIDE REQUEST EXISTS OR THE REGION MOVED. It was
+     * dropped whenever a measurement had started since — and `solve` returns
+     * before its guides land, so the throttle's next measurement always had:
+     * during a drag the rings never moved and every guide solve was thrown
+     * away. A guide for the knobs of a moment ago is still the latest answer
+     * there is (the Peaks guide does not depend on the Peaks knob at all).
+     */
+    async function solveGuides(segments, start, end, kp) {
+      const gs = ++guideSeq
+      const region = `${timelineKey(segments)}|${start}|${end}`
+      let g
+      try {
+        g = await computeVoxPressorGuides(
+          segments, start, end, kp, state.currentFile.sampleRate, state.currentFile.channels,
+        )
+      } catch {
+        return // a guide is advice: the rings keep their last colours
+      }
+      const now = previewRegion()
+      if (gs !== guideSeq || !now || `${timelineKey(state.segments)}|${now.start}|${now.end}` !== region) return
+      voxPeaksGuide.value = peaksGuideKnobs(g.peaksGuide)
+      voxBodyGuide.value = bodyGuideKnobs(g.bodyGuide)
+      followGuide()
     }
 
     /**

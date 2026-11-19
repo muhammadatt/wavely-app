@@ -232,19 +232,33 @@ export function peaksGapDb(channels, sampleRate) {
  * The drive in [lo, hi] at which `f` (increasing in drive) reaches `goal`,
  * from the points `at` has rendered and as few more as it takes. Returns lo
  * when even lo is past it, null when hi falls short.
+ *
+ * `log: true` interpolates and extrapolates on ln f rather than f — for a
+ * figure that grows roughly EXPONENTIALLY with drive, as the voice-touched
+ * one does where the 1176 first reaches the voice (0.0002 → 0.0015 → 0.028
+ * → 0.58 dB at drive 0.6 / 1.3 / 2.6 / 5.3 on a real clip). A straight line
+ * through such points overshoots or crawls; on ln f it lands. The tolerance
+ * stays on f itself. Values at or under `LOG_FLOOR_DB` carry no slope.
  */
-function findDrive(at, points, f, goal, tol, lo, hi, budget) {
+const LOG_FLOOR_DB = 1e-5
+/** The first step up when nothing says how steep `f` is yet (log mode), dB. */
+const LOG_FIRST_STEP_DB = 1
+export function findDrive(at, points, f, goal, tol, lo, hi, budget, { log = false } = {}) {
+  const T = log ? (x => Math.log(Math.max(x, LOG_FLOOR_DB))) : (x => x)
+  const tGoal = T(goal)
   for (;;) {
     let a = null
     let b = null
     let best = null
     for (const q of points) {
-      const v = f(q) - goal
-      if (!best || Math.abs(v) < Math.abs(best.v)) best = { d: q.driveDb, v }
-      if (v < 0 && (!a || q.driveDb > a.d)) a = { d: q.driveDb, v }
-      if (v >= 0 && (!b || q.driveDb < b.d)) b = { d: q.driveDb, v }
+      const fq = f(q)
+      const e = fq - goal
+      const v = T(fq) - tGoal
+      if (!best || Math.abs(e) < Math.abs(best.e)) best = { d: q.driveDb, e }
+      if (e < 0 && (!a || q.driveDb > a.d)) a = { d: q.driveDb, v }
+      if (e >= 0 && (!b || q.driveDb < b.d)) b = { d: q.driveDb, v }
     }
-    if (best && Math.abs(best.v) <= tol) return best.d
+    if (best && Math.abs(best.e) <= tol) return best.d
     if (b && b.d <= lo + 1e-9) return lo
     if (a && a.d >= hi - 1e-9) return null
     let d
@@ -256,12 +270,41 @@ function findDrive(at, points, f, goal, tol, lo, hi, budget) {
       if (b.d - a.d < 0.05) return d
     } else if (a) {
       // All short: step up along the slope of the two highest points (at
-      // least 0.3 dB per dB, so a flat stretch still moves), or to the top.
+      // least 0.3 dB per dB on a linear f, so a flat stretch still moves), or
+      // to the top — and at least DOUBLE the last spacing. ⚠ Without the
+      // doubling a goal that starts flat (the voice-touched figure grows
+      // ~0.003 dB per dB at the bottom of a quiet voice's travel) crawled
+      // 0.17 dB a render, spent the whole budget a quarter of the way up and
+      // read "not reached", so the ring painted all green.
       const up = points.filter(q => q.driveDb <= a.d).sort((x, y) => y.driveDb - x.driveDb)
-      const slope = up.length > 1 ? (f(up[0]) - f(up[1])) / (up[0].driveDb - up[1].driveDb) : 0
-      d = Math.min(hi, a.d + (-a.v) / Math.max(0.3, slope))
+      const spacing = up.length > 1 ? up[0].driveDb - up[1].driveDb : 0
+      let step
+      if (log) {
+        // On ln f the slope is a usable estimate, so it is trusted as it is
+        // (doubling past it cost three renders on the red edge); the doubling
+        // only moves a search that has no slope yet.
+        const known = up.length > 1 && f(up[0]) > LOG_FLOOR_DB && f(up[1]) > LOG_FLOOR_DB
+        const slope = known ? (T(f(up[0])) - T(f(up[1]))) / spacing : 0
+        step = slope > 0 ? (-a.v) / slope : Math.max(LOG_FIRST_STEP_DB, 2 * spacing)
+      } else {
+        // The doubling grows a step the slope FLOOR has shrunk, up to the
+        // secant's own estimate and never past it: a plain "at least double"
+        // overrode a good secant (Body guide, PR 60 → 64 at 0.25 dB per PR,
+        // asked for 68; doubling sent it to 72 and cost a render back).
+        const slope = up.length > 1 ? (f(up[0]) - f(up[1])) / spacing : 0
+        const secant = slope > 0 ? (-a.v) / slope : Infinity
+        step = Math.max((-a.v) / Math.max(0.3, slope), Math.min(2 * spacing, secant))
+      }
+      d = Math.min(hi, a.d + step)
     } else if (b) {
-      d = lo
+      // All past the goal: step DOWN along the slope of the two lowest points,
+      // or halfway to the bottom with one. It went straight to `lo`, a render
+      // far from the answer whenever the seed sat above the goal (the Body
+      // guide after a Peaks move rendered PR 38 to find an edge near 59).
+      const dn = points.filter(q => q.driveDb >= b.d).sort((x, y) => x.driveDb - y.driveDb)
+      const sp = dn.length > 1 ? dn[1].driveDb - dn[0].driveDb : 0
+      const slope = sp > 0 ? (T(f(dn[1])) - T(f(dn[0]))) / sp : 0
+      d = slope > 0 ? Math.max(lo, b.d - b.v / slope) : 0.5 * (lo + b.d)
     } else {
       d = 0.5 * (lo + hi)
     }
@@ -293,8 +336,9 @@ function solvePeaksGuide(channels, sampleRate, base, alignDb, rangeDb, seed) {
   // first guess from the seed lands most searches in two or three renders.
   if (points.length === 0) at(Math.min(hi, Math.max(lo, 0)))
   // The ring's two edges first (they get the render budget), the target last.
-  const touchDriveDb = findDrive(at, points, q => q.bodyDb, PEAKS_BODY_TOUCH_DB, PEAKS_GUIDE_TOUCH_TOL_DB, lo, hi, budget)
-  const warnDriveDb = findDrive(at, points, q => q.bodyDb, PEAKS_BODY_WARN_DB, PEAKS_GUIDE_WARN_TOL_DB, lo, hi, budget)
+  // The voice-touched figure grows ~exponentially with drive: searched on its log.
+  const touchDriveDb = findDrive(at, points, q => q.bodyDb, PEAKS_BODY_TOUCH_DB, PEAKS_GUIDE_TOUCH_TOL_DB, lo, hi, budget, { log: true })
+  const warnDriveDb = findDrive(at, points, q => q.bodyDb, PEAKS_BODY_WARN_DB, PEAKS_GUIDE_WARN_TOL_DB, lo, hi, budget, { log: true })
   const targetDriveDb = gapDb <= 0 ? lo
     : findDrive(at, points, q => q.peaksDb, gapDb, PEAKS_GUIDE_TOL_DB, lo, hi, budget)
   return { gapDb, targetDriveDb, touchDriveDb, warnDriveDb, renders }
@@ -377,55 +421,36 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
    * iterates renders), 1176 2.0 s → 0.4–0.6 s. One entry: a single panel
    * measures one region at a time; the answer is identical to a cold one.
    */
+  const C = cachesFor(p.owner)
   const hash = channelsHash(channels)
+  p = withVoiceProfile(channels, sampleRate, p, hash, C)
   const key = upstreamKey(channels, sampleRate, p, hash)
   /**
    * `measureUntil: 'body'` — the panel's FIRST PASS after a Peaks / Body /
    * Speed move: Peaks and Body only (~0.9 s of the ~2.5 s on 30 s of
    * narration), so their makeups and readouts land before De-ess and Parallel
-   * are re-solved; the full pass that follows reuses them (`bodyCache`). The
+   * are re-solved; the full pass that follows reuses them (the `body` cache). The
    * result carries `partial: true` and no De-ess / Parallel values.
    */
   const untilBody = p.measureUntil === 'body'
-  let up = upstreamCache?.key === key ? upstreamCache.value : null
+  let up = C.upstream?.key === key ? C.upstream.value : null
   if (!up && untilBody) {
     const bKey = bodyKey(channels, sampleRate, p, hash)
-    up = bodyCache?.key === bKey ? bodyCache.value : null
+    up = C.body?.key === bKey ? C.body.value : null
     if (!up) {
       up = measureThroughBody(channels, sampleRate, p)
-      bodyCache = { key: bKey, value: up }
+      C.body = { key: bKey, value: up }
     }
   }
   if (!up) {
-    up = measureUpstream(channels, sampleRate, p, hash)
-    upstreamCache = { key, value: up }
+    up = measureUpstream(channels, sampleRate, p, hash, C)
+    C.upstream = { key, value: up }
   }
   const out = { ...up.out }
   if (up.silent) return out
-  // The Peaks knob's guide: asked for by the panel only (never by apply).
-  if (Array.isArray(p.peaksGuideRangeDb) && Number.isFinite(p.bodyAlignDb)) {
-    const gKey = guideKey(channels, sampleRate, p, up, hash)
-    let guide = guideCache?.key === gKey ? guideCache.value : null
-    if (!guide) {
-      guide = solvePeaksGuide(channels, sampleRate, up.peaksBase, p.bodyAlignDb, p.peaksGuideRangeDb, up.peaksSample)
-      guideCache = { key: gKey, value: guide }
-    }
-    out.peaksGuide = guide
-  }
   if (untilBody) {
     out.partial = true
     return out
-  }
-  // The Body knob's guide: panel only, full pass only (the first pass is for
-  // the makeups), cached on everything Body hears except its own knob.
-  if (Array.isArray(p.bodyGuidePrRange) && Number.isFinite(p.bodyAlignDb)) {
-    const bgKey = bodyGuideKey(channels, sampleRate, p, up, hash)
-    let bg = bodyGuideCache?.key === bgKey ? bodyGuideCache.value : null
-    if (!bg) {
-      bg = solveBodyGuide(sampleRate, up, p.bodyGuidePrRange)
-      bodyGuideCache = { key: bgKey, value: bg }
-    }
-    out.bodyGuide = bg
   }
   const { afterDeEss, voiceF0Hz, ceilingDb } = up
 
@@ -436,8 +461,8 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
   // ⚠ Not `computeFET1176AutoMakeupPlan`: that renders without the sidechain,
   // and this 1176 listens through `ParallelDetector`.
   const pKey = p.parallelMix > 0 ? parallelKey(key, p) : null
-  if (pKey && parallelCache?.key === pKey) {
-    Object.assign(out, parallelCache.value)
+  if (pKey && C.parallel?.key === pKey) {
+    Object.assign(out, C.parallel.value)
   } else if (p.parallelMix > 0) {
     // The LA-2A aligns on the SOURCE (the file's `alignDb`, which reaches the
     // kernel as `bodyAlignDb`), as an LA Vintage 2A slot's preview does — see
@@ -480,7 +505,7 @@ export function measureVoxPressor(channels, sampleRate, p = {}) {
         out.parallelRestoreDb = restoreToCeilingDb(ceilingDb, db(pk))
       }
     }
-    parallelCache = {
+    C.parallel = {
       key: pKey,
       value: Object.fromEntries(PARALLEL_OUT.filter(k => k in out).map(k => [k, out[k]])),
     }
@@ -511,17 +536,116 @@ function parallelKey(upKey, p) {
   return `${upKey}|${JSON.stringify(params)}`
 }
 
-/** The one cached upstream measurement (see `measureVoxPressor`). */
-let upstreamCache = null
-/** The one cached Parallel solve (see `parallelKey`). */
-let parallelCache = null
-/** The one cached Peaks → Body measurement (`measureThroughBody`). */
-let bodyCache = null
+/**
+ * THE KNOBS' GUIDES — the Peaks ring (`solvePeaksGuide`) when
+ * `p.peaksGuideRangeDb` is set, the Body ring (`solveBodyGuide`) when
+ * `p.bodyGuidePrRange` is. Panel only, never an apply's (AUTO would move the
+ * knob mid-apply).
+ *
+ * ⚠ ITS OWN CALL, AFTER `measureVoxPressor` (November 2026): solved inside the
+ * measurement they held the readouts and makeups back ~2.2 s on every new
+ * region (the Body guide's LA-2A renders ~1.8 s of it, the Peaks guide's ~0.4)
+ * — and the Body guide again on every Peaks move — for rings that can colour
+ * in a moment later. Asked right after a
+ * measurement with the same params, the Peaks → Body half it needs comes from
+ * that measurement's cache; a cold call measures it.
+ *
+ * Each guide is cached on what it depends on, so a knob move costs nothing:
+ * the Peaks guide on the region and the 1176's settings (not its knob), the
+ * Body guide on everything Body hears except its own knob.
+ *
+ * @returns {{ peaksGuide?: object, bodyGuide?: object }}
+ */
+export function measureVoxPressorGuides(channels, sampleRate, p = {}) {
+  const res = {}
+  const wantPeaks = Array.isArray(p.peaksGuideRangeDb) && Number.isFinite(p.bodyAlignDb)
+  const wantBody = Array.isArray(p.bodyGuidePrRange) && Number.isFinite(p.bodyAlignDb)
+  if (!wantPeaks && !wantBody) return res
+  const C = cachesFor(p.owner)
+  const hash = channelsHash(channels)
+  p = withVoiceProfile(channels, sampleRate, p, hash, C)
+  const key = upstreamKey(channels, sampleRate, p, hash)
+  let up = C.upstream?.key === key ? C.upstream.value : null
+  if (!up) {
+    const bKey = bodyKey(channels, sampleRate, p, hash)
+    up = C.body?.key === bKey ? C.body.value : null
+    if (!up) {
+      up = measureThroughBody(channels, sampleRate, p)
+      C.body = { key: bKey, value: up }
+    }
+  }
+  if (up.silent) return res
+  if (wantPeaks) {
+    const gKey = guideKey(channels, sampleRate, p, up, hash)
+    let guide = C.guide?.key === gKey ? C.guide.value : null
+    if (!guide) {
+      guide = solvePeaksGuide(channels, sampleRate, up.peaksBase, p.bodyAlignDb, p.peaksGuideRangeDb, up.peaksSample)
+      C.guide = { key: gKey, value: guide }
+    }
+    res.peaksGuide = guide
+  }
+  if (wantBody) {
+    const bgKey = bodyGuideKey(channels, sampleRate, p, up, hash)
+    let bg = C.bodyGuide?.key === bgKey ? C.bodyGuide.value : null
+    if (!bg) {
+      bg = solveBodyGuide(sampleRate, up, p.bodyGuidePrRange)
+      C.bodyGuide = { key: bgKey, value: bg }
+    }
+    res.bodyGuide = bg
+  }
+  return res
+}
 
-/** The one cached Peaks guide (see `solvePeaksGuide`). */
-let guideCache = null
-/** The one cached Body guide (see `solveBodyGuide`). */
-let bodyGuideCache = null
+/**
+ * `p` with the voice's corner and median F0 RESOLVED: as passed, or — when
+ * `cornerHz` is absent — measured here on the region (one cached entry, keyed
+ * on its samples).
+ *
+ * ⚠ EVERY CACHE KEY IS BUILT FROM THE RESOLVED PARAMS. Keyed on `p` as passed,
+ * a region measured with the profile absent (the panel's first measurement)
+ * and then with the measured values handed back (every later one) read as two
+ * different inputs, so the first knob move after a new region missed every
+ * cache: the Body guide re-solved from scratch (6 LA-2A renders, ~1.5 s on
+ * 30 s of narration) for an answer it already had.
+ */
+function withVoiceProfile(channels, sampleRate, p, hash, C) {
+  if (p.cornerHz !== undefined) return p
+  const key = `${sampleRate}|${channels.length}|${channels[0]?.length ?? 0}|${hash}`
+  if (C.profile?.key !== key) {
+    // ⚠ Read BEFORE anything renders: SPEED AUTO takes the 1176's release
+    // from the F0, and a makeup measured at another release is stale.
+    const profile = measureVoiceProfile(channels, sampleRate)
+    C.profile = { key, value: { cornerHz: profile?.cornerHz ?? null, voiceF0Hz: profile?.medianF0Hz ?? null } }
+  }
+  return { ...p, ...C.profile.value }
+}
+
+/**
+ * THE CACHES, ONE SET PER OWNER (`p.owner`: the VoxPressor copy measuring,
+ * absent = one shared set). Each holds ONE entry per kind — a panel measures
+ * one region at a time — and a set was module-wide until the guides moved to a
+ * call of their own: two copies (chain slots, or a slot and the solo panel)
+ * measuring in turn then evicted each other's entries BETWEEN a measurement
+ * and its guides, and the guides re-rendered Peaks → Body cold (~1–2 s). The
+ * most recently used `MAX_CACHE_OWNERS` sets are kept.
+ *
+ * - `upstream`: Peaks → Body → De-ess (see `measureVoxPressor`)
+ * - `parallel`: the Parallel solve (see `parallelKey`)
+ * - `body`: Peaks → Body (`measureThroughBody`)
+ * - `guide` / `bodyGuide`: the knobs' guides (`solvePeaksGuide`, `solveBodyGuide`)
+ * - `profile`: the voice profile measured here (`withVoiceProfile`)
+ */
+const MAX_CACHE_OWNERS = 6
+const cacheSets = new Map()
+function cachesFor(owner) {
+  const id = owner ?? ''
+  let C = cacheSets.get(id)
+  if (C) cacheSets.delete(id)
+  else C = { upstream: null, parallel: null, body: null, guide: null, bodyGuide: null, profile: null }
+  cacheSets.set(id, C)
+  while (cacheSets.size > MAX_CACHE_OWNERS) cacheSets.delete(cacheSets.keys().next().value)
+  return C
+}
 
 /** What Body hears apart from its own knob: the Peaks → Body key without Body's knob and makeup. */
 const BODY_GUIDE_SKIP = new Set([...['deEss', 'deEssOn', 'measureUntil'], 'bodyPeakReduction', 'bodyOn', 'bodyGuidePrRange'])
@@ -531,11 +655,7 @@ function bodyGuideKey(channels, sampleRate, p, up, hash) {
 
 /** Forget them — for tests that time or compare cold measurements. */
 export function clearVoxPressorMeasureCache() {
-  upstreamCache = null
-  parallelCache = null
-  bodyCache = null
-  guideCache = null
-  bodyGuideCache = null
+  cacheSets.clear()
 }
 
 /**
@@ -560,7 +680,7 @@ function guideKey(channels, sampleRate, p, up, hash) {
 const NOT_UPSTREAM = new Set([
   'density', 'outputDb', 'listen', 'bodyMakeupGuess', 'sourcePeakDb', 'makeupDb',
   'peaksMakeupDb', 'peaksCeilingDb', 'peaksRestoreDb', 'bodyMakeupDb', 'bodyCeilingDb',
-  'deEssLevelOffsetDb', 'peaksGuideRangeDb', 'measureUntil', 'outputCeilingDb', 'bodyGuidePrRange',
+  'deEssLevelOffsetDb', 'peaksGuideRangeDb', 'measureUntil', 'outputCeilingDb', 'bodyGuidePrRange', 'owner',
 ])
 
 function upstreamKey(channels, sampleRate, p, hash = channelsHash(channels), skip = null) {
@@ -596,14 +716,14 @@ function channelsHash(channels) {
  * Peaks → Body → De-ess: their readouts, makeups, restores and the de-esser's
  * output, everything the Parallel stage reads. Never mutated by the caller.
  */
-function measureUpstream(channels, sampleRate, p, hash) {
+function measureUpstream(channels, sampleRate, p, hash, C) {
   // The Peaks → Body half has its own cache, so the panel's first pass (`measureUntil: 'body'`)
   // is not paid for again by the full pass right after it.
   const bKey = bodyKey(channels, sampleRate, p, hash)
-  let st = bodyCache?.key === bKey ? bodyCache.value : null
+  let st = C.body?.key === bKey ? C.body.value : null
   if (!st) {
     st = measureThroughBody(channels, sampleRate, p)
-    bodyCache = { key: bKey, value: st }
+    C.body = { key: bKey, value: st }
   }
   if (st.silent) return st
   const out = { ...st.out }
@@ -624,13 +744,10 @@ function measureUpstream(channels, sampleRate, p, hash) {
 
 /** Peaks → Body: their readouts, makeups, restores and Body's output. Never mutated by the caller. */
 function measureThroughBody(channels, sampleRate, p) {
-  // The corner and the median F0 are properties of the file, not of the
-  // knobs: callers that measure repeatedly measure them once and pass them in.
-  // ⚠ The F0 is read BEFORE anything renders: SPEED AUTO takes the 1176's
-  // release from it, and a makeup measured at another release is stale.
-  const profile = p.cornerHz === undefined ? measureVoiceProfile(channels, sampleRate) : null
-  const cornerHz = profile ? (profile.cornerHz ?? null) : p.cornerHz
-  const voiceF0Hz = profile ? (profile.medianF0Hz ?? null) : (p.voiceF0Hz ?? null)
+  // The corner and median F0 arrive RESOLVED (`withVoiceProfile`, which every
+  // entry point runs first): passed in by the caller, or measured once there.
+  const cornerHz = p.cornerHz ?? null
+  const voiceF0Hz = p.voiceF0Hz ?? null
   const base = {
     ...p, oversample: false, listen: 'off', outputDb: 0, makeupDb: 0,
     peaksMakeupDb: 0, peaksCeilingDb: null, bodyMakeupDb: 0, bodyCeilingDb: null,
@@ -645,6 +762,7 @@ function measureThroughBody(channels, sampleRate, p) {
   else delete base.cornerHz
   delete base.peaksGuideRangeDb
   delete base.bodyGuidePrRange
+  delete base.owner
 
   const none = {
     cornerHz, voiceF0Hz, peaksRippleDb: null, sourcePeakDb: null,

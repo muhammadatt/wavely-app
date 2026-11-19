@@ -109,6 +109,64 @@ export function analysisWindow(start, end, maxSeconds = AUTO_MAKEUP_MAX_ANALYSIS
 }
 
 /**
+ * A VOICE PROFILE'S EXCERPT (the speaker's median F0 and rumble corner,
+ * `measureVoiceProfile`): `VOICE_PROFILE_SAMPLE_S` of audio taken as
+ * `VOICE_PROFILE_BLOCKS` equal blocks spread evenly over [start, end), first at
+ * the start and last at the end; the whole span when it is no longer than that.
+ *
+ * The profile is a property of the SPEAKER, so it is measured once per file
+ * version rather than once per selection, and a spread excerpt describes the
+ * file better than its first half-minute. Measured on a 136 s narration (F0 in
+ * Hz): 30 s windows at 0 / 30 / 60 / 90 s read 177.7 / 179.0 / 184.7 / 183.5
+ * (the per-selection spread this replaced), the whole file 182.7, 15 s in 5
+ * blocks 178.0 in 0.33 s against ~0.65–1 s for a 30 s window. The F0 sets SPEED
+ * AUTO's release (16 periods, clamped), so a few per cent is a few ms of release.
+ * ⚠ The tracker is stateful (holds, a rolling median), so the excerpt is fewer
+ * SECONDS of audio, never thinned frames; the 4 joins cost a frame or two each.
+ *
+ * @returns {{start: number, end: number}[]}
+ */
+export const VOICE_PROFILE_SAMPLE_S = 15
+export const VOICE_PROFILE_BLOCKS = 5
+export function voiceProfileSpans(start, end, totalS = VOICE_PROFILE_SAMPLE_S, blocks = VOICE_PROFILE_BLOCKS) {
+  const dur = end - start
+  if (!(dur > 0)) return []
+  if (dur <= totalS) return [{ start, end }]
+  if (blocks < 2) return [{ start, end: start + totalS }]
+  const len = totalS / blocks
+  return Array.from({ length: blocks }, (_, i) => {
+    const s = start + (i * (dur - len)) / (blocks - 1)
+    return { start: s, end: s + len }
+  })
+}
+
+/** Concatenate per-channel parts (`[part][channel]`) into one Float32Array per channel. */
+export function concatChannelParts(parts, channels = parts[0]?.length ?? 1) {
+  const len = parts.reduce((n, p) => n + (p[0]?.length ?? 0), 0)
+  return Array.from({ length: channels }, (_, c) => {
+    const out = new Float32Array(len)
+    let at = 0
+    for (const p of parts) { out.set(p[c], at); at += p[c].length }
+    return out
+  })
+}
+
+/**
+ * The voice-profile excerpt (`voiceProfileSpans`) cut from whole decoded
+ * channels: what the panel measures, for callers that hold the audio itself
+ * (the marketing renderer).
+ */
+export function voiceProfileExcerpt(channels, sampleRate) {
+  const n = channels[0]?.length ?? 0
+  const parts = voiceProfileSpans(0, n / sampleRate).map(w => {
+    const from = Math.round(w.start * sampleRate)
+    const to = Math.min(n, Math.round(w.end * sampleRate))
+    return channels.map(ch => ch.subarray(from, to))
+  })
+  return concatChannelParts(parts, channels.length)
+}
+
+/**
  * The peak sample magnitude of a region, in dBFS, WITHOUT rendering it.
  *
  * Mirrors `renderRegionToBuffer`'s segment walk exactly — that function is a
