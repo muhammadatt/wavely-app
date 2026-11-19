@@ -11,6 +11,17 @@ const MAX_POLL_ATTEMPTS = 400       // 400 × 3 s = 20 min of processing
 // use it up, and the client would abandon a job the server then finishes. It
 // has its own, longer cap.
 const MAX_QUEUE_POLLS = 1200        // 1200 × 3 s = 60 min in line
+// A status check that fails to reach the server at all (offline, a phone
+// waking from sleep, a dropped connection) is tried again rather than
+// abandoning a job the server is still running. This many in a row gives up.
+// Only an error marked `networkError` counts (src/api/jobs.js marks fetch's own
+// rejection); an answer from the server, or a bug in the caller, is not retried.
+const MAX_NETWORK_RETRIES = 20      // ~1 min at 3 s
+
+/** A fetch that never reached the server, as opposed to an error it answered with. */
+export function isNetworkError(err) {
+  return err?.networkError === true
+}
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -25,12 +36,21 @@ function sleep(ms) {
 export async function pollJob({
   fetchStatus, onProgress, wait = sleep, interval = POLL_INTERVAL_MS,
   maxPolls = MAX_POLL_ATTEMPTS, maxQueuePolls = MAX_QUEUE_POLLS,
+  maxNetworkRetries = MAX_NETWORK_RETRIES,
 }) {
   let processingPolls = 0
   let queuePolls = 0
+  let networkFailures = 0
   while (processingPolls < maxPolls && queuePolls < maxQueuePolls) {
     await wait(interval)
-    const job = await fetchStatus()
+    let job
+    try {
+      job = await fetchStatus()
+    } catch (err) {
+      if (!isNetworkError(err) || ++networkFailures > maxNetworkRetries) throw err
+      continue
+    }
+    networkFailures = 0
     if (job.status === 'done') return job
     if (job.status === 'error') throw new Error(job.error || 'Processing failed on server')
     if (onProgress && job.progress) onProgress(job.progress)

@@ -1,5 +1,6 @@
 import { getSegmentDuration } from './operations.js'
 import { getEffectChainIfExists } from './effectChain.js'
+import { setPlaybackAudioSession } from '../platform/audioSession.js'
 
 /**
  * Playback engine using Web Audio API.
@@ -192,6 +193,9 @@ export function startPlayback(
   segments, startTime, audioContext, onTimeUpdate, onEnd, endTime = null, options = {},
 ) {
   stopPlayback()
+  // Sound is starting: claim the playback audio session now, so an iPhone on
+  // silent still plays. Not at context creation, which also happens on import.
+  setPlaybackAudioSession()
 
   const now = audioContext.currentTime
   playbackStartTime = now

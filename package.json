@@ -36,6 +36,7 @@
     "la2a:taper": "node scripts/la2a-ballistics.mjs --taper",
     "la2a:taper:selftest": "node scripts/la2a-ballistics.mjs --taper --selftest",
     "smoke": "node scripts/panel-smoke.mjs",
+    "autosave:check": "node scripts/autosave-check.mjs",
     "help:shots": "node scripts/help-shots.mjs",
     "marketing:render": "node scripts/marketing-render.mjs",
     "la2a:align": "node scripts/la2a-input-align.mjs",
@@ -67,7 +68,8 @@
     "fet:release-depth:selftest": "node scripts/fet-release-depth.mjs --selftest",
     "fet:ballistics:selftest": "node scripts/fet-ballistics.mjs --fit --selftest",
     "la2a:curve": "node scripts/la2a-curve-bench.mjs",
-    "la2a:curve:selftest": "node scripts/la2a-curve-bench.mjs --selftest"
+    "la2a:curve:selftest": "node scripts/la2a-curve-bench.mjs --selftest",
+    "jobs:check": "node scripts/server-jobs-check.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

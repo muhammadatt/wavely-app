@@ -5,6 +5,9 @@ import { computePeakCache } from '../audio/processing.js'
 import { readSourceFormat } from '../audio/sourceFormat.js'
 import { isCancellation } from '../audio/fileSave.js'
 import { useWorkingFolder } from './useWorkingFolder.js'
+import {
+  checkImport, estimateDecodedBytes, importMessage, isMobileDevice, memoryBudget,
+} from '../platform/memoryBudget.js'
 
 /**
  * Shared file import. Every entry point into the app — the empty state, the
@@ -27,7 +30,32 @@ const isImporting = ref(false)
 const importProgress = ref({ done: 0, total: 0 })
 
 export function useFileImport() {
-  const { createDocument, getAudioContext, setPeakCache, showToast } = useEditorState()
+  const { createDocument, getAudioContext, setPeakCache, showToast, poolBytes } = useEditorState()
+
+  /**
+   * Whether a file's decoded audio fits in this device's memory budget
+   * (memoryBudget.js), with the files already open. Shows the warning or the
+   * refusal itself. A file whose length cannot be read is let through.
+   * @returns {Promise<'ok'|'warn'|'refuse'>}
+   */
+  async function checkFits(file, sourceFormat, sampleRate) {
+    let newBytes = null
+    try {
+      newBytes = await estimateDecodedBytes(file, { sourceFormat, sampleRate })
+    } catch (err) {
+      console.warn(`Couldn't read the length of ${file.name}:`, err)
+    }
+    const mobile = isMobileDevice()
+    const budgetBytes = memoryBudget()
+    const { action, peakBytes } = checkImport({
+      newBytes, fileBytes: file.size, poolBytes: poolBytes.value, budgetBytes, mobile,
+    })
+    const message = importMessage(action, {
+      fileName: file.name, newBytes, peakBytes, poolBytes: poolBytes.value, budgetBytes, mobile,
+    })
+    if (message) showToast(message, action === 'refuse' ? 12000 : 9000, { tone: 'warn' })
+    return action
+  }
 
   /**
    * Decode files and open each as a new document.
@@ -55,15 +83,33 @@ export function useFileImport() {
 
     const createdIds = []
     const failed = []
+    const refused = []
 
     try {
       // Sequential rather than parallel: decoding is memory-hungry (32-bit
       // float PCM is ~10 MB per minute per channel) and decoding a dropped
       // folder of chapters all at once is a reliable way to kill the tab.
       for (const [i, { file, handle }] of supported.entries()) {
+        // The header first: it is cheap, the Save dialog wants it, and the
+        // memory check below needs its channel count.
+        let sourceFormat = null
+        try {
+          sourceFormat = await readSourceFormat(file)
+        } catch (err) {
+          console.warn(`Couldn't read the header of ${file.name}:`, err)
+        }
+
         let audioBuffer
         try {
           const ctx = getAudioContext()
+          // Will it fit? Checked BEFORE decoding: on a phone, decoding a file
+          // that does not fit kills the tab and every open file with it.
+          const fits = await checkFits(file, sourceFormat, ctx.sampleRate)
+          if (fits === 'refuse') {
+            refused.push(file.name)
+            importProgress.value = { done: i + 1, total: supported.length }
+            continue
+          }
           audioBuffer = await decodeAudioFile(file, ctx)
         } catch (err) {
           console.error(`Failed to decode ${file.name}:`, err)
@@ -72,19 +118,14 @@ export function useFileImport() {
           continue
         }
 
-        let sourceFormat = null
-        try {
-          sourceFormat = await readSourceFormat(file)
-        } catch (err) {
-          console.warn(`Couldn't read the header of ${file.name}:`, err)
-        }
-
         const { docId, bufferId } = createDocument(file.name, audioBuffer, {
           // Activate the first successful import so the user lands on
           // something; later files open behind it without stealing focus.
           activate: activateFirst && createdIds.length === 0,
           sourceFormat,
           sourceHandle: handle ?? null,
+          // Kept so session autosave can store the file's bytes, not its decoded samples.
+          sourceFile: file,
         })
         createdIds.push(docId)
 

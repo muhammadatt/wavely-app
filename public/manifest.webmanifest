@@ -1,0 +1,16 @@
+{
+  "name": "crisp.fm — Audio Editor",
+  "short_name": "crisp.fm",
+  "description": "Clean up, edit and master voice recordings in the browser.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e1216",
+  "theme_color": "#0e1216",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -8,18 +8,21 @@ import {
 } from '../../audio/presets.js'
 import { processAudioOnServer } from '../../api/processing.js'
 import { useEntitlements } from '../../composables/useEntitlements.js'
-import { computePeakCache } from '../../audio/processing.js'
 import { getTimelineDuration } from '../../audio/operations.js'
+import { useServerJobs } from '../../composables/useServerJobs.js'
+import { commitMasteringResult } from '../../composables/masteringResult.js'
+import { timelineKey } from '../../audio/serverJobRecord.js'
 import ProcessingReportPanel from './ProcessingReportPanel.vue'
 import BaseButton from '../ui/BaseButton.vue'
 import Icon from '../ui/Icon.vue'
 
 const {
-  state, appState, setPreset, setOutputProfile, setProcessingReport, showToast,
-  getAudioContext, replaceRegion, setPeakCache, getDocument,
+  state, appState, setPreset, setOutputProfile, showToast,
+  getAudioContext, getDocument,
   startProcessing, updateProcessingProgress, updateProcessingStage, endProcessing,
 } = useEditorState()
 const entitlements = useEntitlements()
+const serverJobs = useServerJobs()
 
 // Friendly stage sequence shown while the server processes the audio.
 // Each entry has a message (cute/friendly), progress (0-1), and delay in ms.
@@ -193,8 +196,17 @@ async function handleProcess() {
     )
   }
 
+  // Recorded once the server accepts it, so a reload or a closed tab can pick
+  // the job up again (useServerJobs.js).
+  const tracked = serverJobs.beginJob({
+    kind: 'mastering', docId, name: doc.name, timeline: timelineKey(doc.segments),
+    start: 0, end: getTimelineDuration(doc.segments),
+    sampleRate: doc.currentFile.sampleRate, channels: doc.currentFile.channels,
+    extra: { preset, outputProfile: doc.selectedOutputProfile },
+  })
+
   try {
-    const { report, audioBlob, peaks } = await processAudioOnServer({
+    const { report, audioBlob } = await processAudioOnServer({
       segments: doc.segments,
       sampleRate: doc.currentFile.sampleRate,
       channels: doc.currentFile.channels,
@@ -204,6 +216,7 @@ async function handleProcess() {
       separationModel: preset === 'noise_eraser' ? selectedModels.value.noise_eraser : undefined,
       onUploadProgress,
       onUploaded,
+      onSubmitted: tracked.submitted,
     })
 
     // The user can close a document while its job is in flight. Bail rather
@@ -211,42 +224,8 @@ async function handleProcess() {
     // into the pool.
     if (!getDocument(docId)) return
 
-    // Decode the processed audio blob into an AudioBuffer
-    const ctx = getAudioContext()
-    const arrayBuffer = await audioBlob.arrayBuffer()
-    const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-
-    // Replace that document's entire timeline with the processed audio
-    const dur = getTimelineDuration(doc.segments)
-    const bufferId = replaceRegion(
-      0, dur, audioBuffer, `${PRESETS[preset]?.displayName ?? 'Preset'} mastering`, docId,
-      selectionAtStart,
-    )
-
-    // Sync file metadata to reflect the processed audio properties.
-    // Server-side presets can change channel count (e.g. Noise Eraser → mono)
-    // and sample rate. Without this, export/render loops use the stale original
-    // channel count and crash with IndexSizeError when calling getChannelData(1)
-    // on a mono AudioBuffer.
-    doc.currentFile.channels = audioBuffer.numberOfChannels
-    doc.currentFile.sampleRate = audioBuffer.sampleRate
-    doc.currentFile.duration = audioBuffer.duration
-
-    // Compute peak cache for the new buffer
-    const cache = await computePeakCache(audioBuffer, 256)
-    setPeakCache(bufferId, cache)
-
-    setProcessingReport(report, docId)
-
-    // Name the file in the toast — with several documents open, "Processing
-    // complete" alone doesn't say which one finished.
-    const suffix = appState.documents.length > 1 ? ` — ${doc.name}` : ''
-    if (report.acx_certification) {
-      const label = report.acx_certification.certificate === 'pass' ? 'PASS' : 'FAIL'
-      showToast(`ACX certification: ${label}${suffix}`)
-    } else {
-      showToast(`Processing complete${suffix}`)
-    }
+    const audioBuffer = await getAudioContext().decodeAudioData(await audioBlob.arrayBuffer())
+    await commitMasteringResult({ docId, audioBuffer, report, preset, selection: selectionAtStart })
   } catch (err) {
     console.error('Server processing failed:', err)
     if (entitlements.handleServerRefusal(err)) return
@@ -254,6 +233,7 @@ async function handleProcess() {
     showToast((err.message || 'Processing failed') + suffix)
   } finally {
     stageTimers.forEach(clearTimeout)
+    tracked.end()
     endProcessing(docId)
   }
 }

@@ -1,4 +1,4 @@
-import { reactive, computed, ref } from 'vue'
+import { reactive, computed, ref, readonly } from 'vue'
 import { v4 as uuidv4 } from 'uuid'
 import {
   cloneSegments,
@@ -15,6 +15,10 @@ import {
 } from '../audio/operations.js'
 import { stopPlayback } from '../audio/playback.js'
 import { getDefaultOutputProfile, isOutputProfileLocked } from '../audio/presets.js'
+import { createAudioContext, onContextStopped, resumeIfStopped } from '../platform/audioSession.js'
+import { bufferBytes, memoryBudget } from '../platform/memoryBudget.js'
+import { historyTrim, segmentBufferIds, unreferencedBufferIds } from '../audio/historyBudget.js'
+import { restoreSegments } from '../audio/sessionSnapshot.js'
 
 const UNDO_STACK_CAP = 50
 
@@ -102,6 +106,35 @@ const appState = reactive({
 // the buffers no other document still references.
 const bufferPool = new Map()
 
+// Bytes of decoded audio in the pool, kept in step by poolSet / poolDelete —
+// the ONLY ways the pool changes. Read by the import check (memoryBudget.js)
+// before a file is decoded; a phone's tab is killed, not warned, when it runs
+// out. A buffer leaves the pool when its document closes, or when nothing
+// reaches it any more (releaseUnreferencedBuffers, after each undo step).
+const poolBytes = ref(0)
+
+function poolSet(id, buffer) {
+  const prev = bufferPool.get(id)
+  if (prev === buffer) return
+  poolBytes.value += bufferBytes(buffer) - bufferBytes(prev)
+  bufferPool.set(id, buffer)
+}
+
+function poolDelete(id) {
+  const prev = bufferPool.get(id)
+  if (!prev) return
+  poolBytes.value -= bufferBytes(prev)
+  bufferPool.delete(id)
+  bufferSourceFiles.delete(id)
+}
+
+// Map<bufferId, File> — the file an opened document's original buffer was
+// decoded from. Session autosave stores these bytes rather than the decoded
+// samples (a WAV is half their size, an MP3 a tenth) and decodes them again on
+// restore. A File from a picker or a drop is backed by the disk, so holding it
+// costs nothing.
+const bufferSourceFiles = new Map()
+
 // Peak caches — Map<bufferId, { samplesPerPx, peaks }>
 const peakCaches = new Map()
 const peakCacheVersion = ref(0)
@@ -148,6 +181,9 @@ let activationSeq = 0
 // from history directly. The reactive `undoCount`/`redoCount` on the document
 // are what drive canUndo/canRedo.
 const docHistory = new Map()
+
+// Files already told that their undo history was trimmed (see noteHistoryTrim).
+const historyTrimNoticed = new Set()
 
 // Sticky preset choice. A narrator mastering 20 chapters wants one preset
 // across all of them, so a new document inherits the last explicit choice
@@ -215,15 +251,86 @@ function snapshot(doc, label, selection = doc.selection) {
   }
 }
 
-/** Push an undo entry for an edit about to happen to `doc`, and invalidate redo. */
+/**
+ * How much decoded audio ONE file's undo history may keep alive on its own
+ * (historyBudget.js): half this device's memory budget — 512 MiB on a phone
+ * with no reported memory, 2 GiB on a desktop. Reasoned, not measured.
+ */
+export const HISTORY_BUDGET_SHARE = 0.5
+let historyBudgetBytes = Math.floor(memoryBudget() * HISTORY_BUDGET_SHARE)
+
+/** Tests set a small budget; returns the previous one so they can put it back. */
+export function setHistoryBudgetBytes(bytes) {
+  const prev = historyBudgetBytes
+  historyBudgetBytes = bytes
+  return prev
+}
+
+/** Buffers in use outside history: every open file's timeline, and the clipboard. */
+function liveBufferIds() {
+  const ids = new Set()
+  for (const d of appState.documents) segmentBufferIds(d.segments, ids)
+  segmentBufferIds(appState.clipboard, ids)
+  return ids
+}
+
+/**
+ * Drop pool buffers nothing reaches any more — no timeline, no history step of
+ * any file, not the clipboard — so the browser can reclaim them. Until this
+ * existed a buffer left the pool only when its file closed, so every apply's
+ * output stayed in memory after undo had long forgotten it.
+ */
+function releaseUnreferencedBuffers() {
+  const lists = [appState.clipboard ?? []]
+  for (const d of appState.documents) lists.push(d.segments)
+  for (const h of docHistory.values()) {
+    for (const e of h.undo) lists.push(e.segments)
+    for (const e of h.redo) lists.push(e.segments)
+  }
+  for (const id of unreferencedBufferIds([...bufferPool.keys()], lists)) {
+    poolDelete(id)
+    peakCaches.delete(id)
+    for (const owned of docBuffers.values()) owned.delete(id)
+  }
+}
+
+/**
+ * Push an undo entry for an edit about to happen to `doc`, and invalidate redo.
+ * History is then trimmed from the oldest step to its byte budget (the newest
+ * step always stays) and to UNDO_STACK_CAP steps. Returns how many steps the
+ * byte budget dropped, so the caller can say so.
+ */
 function recordUndo(doc, label, selection = doc.selection) {
   const h = historyFor(doc.id)
   h.undo.push(snapshot(doc, label, selection))
   if (h.undo.length > UNDO_STACK_CAP) h.undo.shift()
   h.redo.length = 0
+  const drop = enforceHistoryBudget(doc)
   doc.revision = ++revisionSeq
-  doc.undoCount = h.undo.length
   doc.redoCount = 0
+  return drop
+}
+
+/**
+ * Trim `doc`'s undo history to its byte budget and release what that frees.
+ * Run when a step is recorded AND again once an apply has committed: before
+ * the commit, the buffer being replaced is still on the timeline and counts as
+ * live, so a check at record time alone lets history run one step over.
+ * Returns how many steps were dropped.
+ */
+function enforceHistoryBudget(doc) {
+  const h = historyFor(doc.id)
+  const { drop } = historyTrim({
+    undo: h.undo,
+    redo: h.redo,
+    liveIds: liveBufferIds(),
+    bytesOf: id => bufferBytes(bufferPool.get(id)),
+    budgetBytes: historyBudgetBytes,
+  })
+  if (drop > 0) h.undo.splice(0, drop)
+  releaseUnreferencedBuffers()
+  doc.undoCount = h.undo.length
+  return drop
 }
 
 
@@ -289,11 +396,19 @@ export function useEditorState() {
   // AudioContext management
   function getAudioContext() {
     if (!audioContext) {
-      audioContext = new (window.AudioContext || window.webkitAudioContext)()
+      // The playback audio session is NOT claimed here: this context also
+      // decodes imports, and claiming it would pause the user's music the moment
+      // a file is opened. startPlayback() claims it when sound starts.
+      audioContext = createAudioContext()
+      // A call or another app stopped the audio: stop the transport to match,
+      // so the next Play (a click, which iOS needs) resumes it cleanly.
+      onContextStopped(audioContext, () => {
+        stopPlayback()
+        for (const doc of appState.documents) doc.isPlaying = false
+      })
     }
-    if (audioContext.state === 'suspended') {
-      audioContext.resume()
-    }
+    // 'interrupted' too (Safari, after a call or another app took the audio).
+    resumeIfStopped(audioContext)
     return audioContext
   }
 
@@ -313,7 +428,17 @@ export function useEditorState() {
   function pushUndo(label = '') {
     const doc = activeDocument.value
     if (!doc) return
-    recordUndo(doc, label)
+    noteHistoryTrim(doc, recordUndo(doc, label))
+  }
+
+  /**
+   * Say once per file that older undo steps were let go to save memory —
+   * otherwise Undo just stops earlier than the user expects, with no reason.
+   */
+  function noteHistoryTrim(doc, dropped) {
+    if (!(dropped > 0) || historyTrimNoticed.has(doc.id)) return
+    historyTrimNoticed.add(doc.id)
+    showToast('Older undo steps were cleared to free memory. Recent steps can still be undone.', 8000)
   }
 
   /**
@@ -368,7 +493,7 @@ export function useEditorState() {
    * document). Ownership decides who can free it on close.
    */
   function addBuffer(id, buffer, docId = appState.activeDocumentId) {
-    bufferPool.set(id, buffer)
+    poolSet(id, buffer)
     if (docId) buffersFor(docId).add(id)
   }
 
@@ -441,12 +566,16 @@ export function useEditorState() {
    * Create a document from a decoded buffer and make it active.
    * @returns {{ docId: string, bufferId: string }}
    */
-  function createDocument(name, audioBuffer, { activate = true, sourceFormat = null, sourceHandle = null } = {}) {
+  function createDocument(name, audioBuffer, { activate = true, sourceFormat = null, sourceHandle = null, sourceFile = null, unsaved = false } = {}) {
     const doc = makeDocument(name, audioBuffer, sourceFormat)
+    // Audio that exists nowhere on disk (a server result with no file to land
+    // on) opens unsaved, so autosave keeps it and closing it asks first.
+    if (unsaved) doc.savedRevision = -1
     if (sourceHandle) docSourceHandles.set(doc.id, sourceHandle)
     appState.documents.push(doc)
 
-    bufferPool.set(doc.bufferId, audioBuffer)
+    poolSet(doc.bufferId, audioBuffer)
+    if (sourceFile) bufferSourceFiles.set(doc.bufferId, sourceFile)
     buffersFor(doc.id).add(doc.bufferId)
     historyFor(doc.id)
 
@@ -456,6 +585,58 @@ export function useEditorState() {
 
   function getDocument(docId) {
     return appState.documents.find(d => d.id === docId) ?? null
+  }
+
+  /**
+   * Re-open a document session autosave kept (sessionSnapshot.js): its
+   * timeline over buffers loaded back from storage. It opens UNSAVED — its
+   * edits were never written to disk — with a fresh, empty undo history, and
+   * with no source file handle, so its first Save asks where to write.
+   *
+   * @param {object} snapshot  one of a manifest's `docs`
+   * @param {Map<string, AudioBuffer>} buffers  every buffer its segments use
+   * @param {{ sourceFiles?: Map<string, File>, activate?: boolean }} [opts]
+   */
+  function restoreDocument(snapshot, buffers, { sourceFiles = new Map(), activate = false } = {}) {
+    const segments = restoreSegments(snapshot, buffers)
+    const first = segments.find(s => s.sourceBuffer) ?? null
+    const doc = makeDocument(snapshot.name, first?.sourceBuffer ?? { duration: 0, sampleRate: 44100, numberOfChannels: 1 }, snapshot.sourceFormat)
+    doc.bufferId = first?.sourceBufferId ?? doc.bufferId
+    doc.segments = segments
+    doc.currentFile.duration = getTimelineDuration(segments)
+    doc.selection = snapshot.selection
+    doc.playhead = Math.min(snapshot.playhead ?? 0, doc.currentFile.duration)
+    if (snapshot.selectedPreset) doc.selectedPreset = snapshot.selectedPreset
+    if (snapshot.selectedOutputProfile) doc.selectedOutputProfile = snapshot.selectedOutputProfile
+    // Unsaved: these edits exist nowhere on disk.
+    doc.revision = ++revisionSeq
+    doc.savedRevision = -1
+    appState.documents.push(doc)
+
+    const owned = buffersFor(doc.id)
+    for (const [id, buffer] of buffers) {
+      if (!segments.some(s => s.sourceBufferId === id)) continue
+      poolSet(id, buffer)
+      owned.add(id)
+      if (sourceFiles.has(id)) bufferSourceFiles.set(id, sourceFiles.get(id))
+    }
+    historyFor(doc.id)
+    if (activate) setActiveDocument(doc.id)
+    return doc.id
+  }
+
+  /** The file a buffer was decoded from, when it came straight from one (see bufferSourceFiles). */
+  function getBufferSourceFile(bufferId) {
+    return bufferSourceFiles.get(bufferId) ?? null
+  }
+
+  /**
+   * Stop treating a file as the buffer's bytes — it can no longer be read (the
+   * original was replaced by a Save, moved or deleted on disk). Autosave then
+   * stores the decoded samples instead.
+   */
+  function forgetBufferSourceFile(bufferId) {
+    bufferSourceFiles.delete(bufferId)
   }
 
   function setActiveDocument(docId) {
@@ -536,13 +717,14 @@ export function useEditorState() {
           if (otherDocId !== docId && set.has(bufferId)) { stillUsed = true; break }
         }
         if (!stillUsed) {
-          bufferPool.delete(bufferId)
+          poolDelete(bufferId)
           peakCaches.delete(bufferId)
         }
       }
     }
     docBuffers.delete(docId)
     docHistory.delete(docId)
+    historyTrimNoticed.delete(docId)
     docSaveTargets.delete(docId)
     docSaveSettings.delete(docId)
     docSourceHandles.delete(docId)
@@ -706,7 +888,7 @@ export function useEditorState() {
       if (!seg.sourceBufferId) continue
       owned.add(seg.sourceBufferId)
       if (!bufferPool.has(seg.sourceBufferId) && seg.sourceBuffer) {
-        bufferPool.set(seg.sourceBufferId, seg.sourceBuffer)
+        poolSet(seg.sourceBufferId, seg.sourceBuffer)
       }
     }
     state.segments = insertSegments(state.segments, position, appState.clipboard)
@@ -728,11 +910,14 @@ export function useEditorState() {
     // the commit can land seconds later, and the waveform stays usable
     // meanwhile, so the live selection may be something else by now. Passing
     // null says "nothing was selected"; omitting it falls back to the live one.
-    recordUndo(doc, label, selection === undefined ? doc.selection : selection)
+    let dropped = recordUndo(doc, label, selection === undefined ? doc.selection : selection)
 
     const bufferId = uuidv4()
     addBuffer(bufferId, newBuffer, doc.id)
     doc.segments = replaceRegionWithBuffer(doc.segments, start, end, newBuffer, bufferId)
+    // Again now the replaced audio has left the timeline (see enforceHistoryBudget).
+    dropped += enforceHistoryBudget(doc)
+    noteHistoryTrim(doc, dropped)
     return bufferId
   }
 
@@ -909,9 +1094,10 @@ export function useEditorState() {
 
   // ── Toast ──────────────────────────────────────────────────────────────────
   let toastId = 0
-  function showToast(message, duration = 3000) {
+  /** `tone: 'warn'` shows a warning icon instead of the tick. */
+  function showToast(message, duration = 3000, { tone = 'ok' } = {}) {
     const id = ++toastId
-    appState.toasts.push({ id, message })
+    appState.toasts.push({ id, message, tone })
     setTimeout(() => {
       appState.toasts = appState.toasts.filter(t => t.id !== id)
     }, duration)
@@ -922,6 +1108,8 @@ export function useEditorState() {
     appState,
     bufferPool,
     peakCaches,
+    /** Bytes of decoded audio held by every open document (read-only). */
+    poolBytes: readonly(poolBytes),
 
     // Computed
     totalDuration,
@@ -952,6 +1140,9 @@ export function useEditorState() {
 
     // Documents
     createDocument,
+    restoreDocument,
+    getBufferSourceFile,
+    forgetBufferSourceFile,
     getDocument,
     pinActiveDocument,
     setActiveDocument,
