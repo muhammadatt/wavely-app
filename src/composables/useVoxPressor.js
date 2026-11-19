@@ -346,13 +346,19 @@ const copies = pluginCopies((copy, life) => {
       const pKnobs = peaksKnobs()
       const peaksKey = `${regionKey}|${pKnobs}`
       voxPendingPeaksKey.value = peaksKey
+      // ⚠ THE KNOBS ARE READ HERE, WITH THE KEYS, NOT AFTER THE AWAIT BELOW.
+      // Read after it, a knob moved while the voice profile was measured was
+      // measured under the OLD knob's key, and moved back before the trailing
+      // measurement landed, `prepareApply` found `solvedFor` matching and
+      // applied makeups measured at the wrong setting.
+      const knobs = toKernelParams(currentParams())
       voxBusy.value = true
       try {
         const profile = await ensureVoiceProfile(segments)
         if (seq !== solveSeq) return null
         // `owner`: the solver keeps one cache set per copy, so two VoxPressor
         // copies measuring in turn never evict each other's entries.
-        const kp = { ...toKernelParams(currentParams()), cornerHz: profile.cornerHz, voiceF0Hz: profile.voiceF0Hz, owner: windowId }
+        const kp = { ...knobs, cornerHz: profile.cornerHz, voiceF0Hz: profile.voiceF0Hz, owner: windowId }
         // The LA-2A stage's makeup solve starts from the last answer, so a
         // knob move usually converges in one render.
         if (Number.isFinite(voxMeasured.value.bodyMakeupDb)) kp.bodyMakeupGuess = voxMeasured.value.bodyMakeupDb
