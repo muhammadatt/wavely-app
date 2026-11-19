@@ -738,9 +738,12 @@ test('Peaks guide: target takes the gap off the peaks, touch first lowers the vo
   S.clearVoxPressorMeasureCache()
   const withGuide = { ...kpAt(3), peaksGuideRangeDb: P.peaksGuideRangeDb() }
   const r = S.measureVoxPressor([x], SR, withGuide)
-  const g = P.peaksGuideKnobs(r.peaksGuide)
+  // The measurement no longer carries it: the panel asks for the guides next.
+  assert.equal(r.peaksGuide, undefined)
+  const gr = S.measureVoxPressorGuides([x], SR, withGuide)
+  const g = P.peaksGuideKnobs(gr.peaksGuide)
   assert.ok(g && g.gapDb > 1, `gap ${g?.gapDb}`)
-  assert.ok(r.peaksGuide.renders <= S.PEAKS_GUIDE_MAX_RENDERS)
+  assert.ok(gr.peaksGuide.renders <= S.PEAKS_GUIDE_MAX_RENDERS)
   assert.ok(g.target > 0 && g.target < P.PEAKS_MAX, `target ${g.target}`)
   // The knobs do what the guide says.
   const atTarget = S.measureVoxPressor([x], SR, kpAt(g.target))
@@ -756,14 +759,15 @@ test('Peaks guide: target takes the gap off the peaks, touch first lowers the vo
     assert.ok(Math.abs(atWarn.peaksBodyDb - S.PEAKS_BODY_WARN_DB) < 0.1, `at warn: voice ${atWarn.peaksBodyDb}`)
   }
   // The guide does not move with the knob (cached: no renders), nor change the rest.
-  const again = S.measureVoxPressor([x], SR, { ...kpAt(7), peaksGuideRangeDb: P.peaksGuideRangeDb() })
-  assert.deepEqual(again.peaksGuide, r.peaksGuide)
+  const again = S.measureVoxPressorGuides([x], SR, { ...kpAt(7), peaksGuideRangeDb: P.peaksGuideRangeDb() })
+  assert.deepEqual(again.peaksGuide, gr.peaksGuide)
   const plain = S.measureVoxPressor([x], SR, kpAt(3))
-  assert.equal(plain.peaksGuide, undefined)
+  assert.equal(S.measureVoxPressorGuides([x], SR, kpAt(3)).peaksGuide, undefined)
   for (const k of VOX_MEASURED_KEYS) assert.deepEqual(plain[k], r[k], k)
   // A cold search from another knob lands within a tenth of a step.
   S.clearVoxPressorMeasureCache()
-  const cold = P.peaksGuideKnobs(S.measureVoxPressor([x], SR, { ...kpAt(9), peaksGuideRangeDb: P.peaksGuideRangeDb() }).peaksGuide)
+  // Cold: the guides measure the Peaks → Body half themselves when no measurement came first.
+  const cold = P.peaksGuideKnobs(S.measureVoxPressorGuides([x], SR, { ...kpAt(9), peaksGuideRangeDb: P.peaksGuideRangeDb() }).peaksGuide)
   assert.ok(Math.abs(cold.target - g.target) < 0.15, `${cold.target} vs ${g.target}`)
 })
 
@@ -782,6 +786,14 @@ test('Guide search: a goal that starts flat is still reached within the budget',
   assert.ok(d !== null, 'not reached')
   assert.ok(Math.abs(f(d) - goal) <= 0.02, `${d}: ${f(d)}`)
   assert.ok(renders <= 10, `${renders} renders`)
+  // On ln f (the guide's `log` mode, for this exponential figure) it lands in fewer.
+  const logPoints = []
+  let logRenders = 0
+  const logAt = x => { logRenders++; logPoints.push({ driveDb: x, v: f(x) }) }
+  logAt(0.257)
+  const dl = S.findDrive(logAt, logPoints, q => q.v, goal, 0.02, -3.3, 8, () => 10 - logRenders, { log: true })
+  assert.ok(dl !== null && Math.abs(f(dl) - goal) <= 0.02, `${dl}: ${f(dl)}`)
+  assert.ok(logRenders < renders, `log ${logRenders} vs linear ${renders}`)
 })
 
 test('Peaks guide: knob mapping inverts the drive law and clamps to the travel', async () => {
@@ -802,8 +814,10 @@ test('Body guide: amber where the LA-2A averages BODY_GUIDE_EDGE_DB, red at BODY
   const kpAt = body => toKernelParams({ ...VOX_DEFAULTS, peaks: 3, body, deEss: 0, parallel: 0, density: 0, alignDb })
   S.clearVoxPressorMeasureCache()
   const r = S.measureVoxPressor([x], SR, { ...kpAt(4.8), bodyGuidePrRange: P.bodyGuidePrRange() })
-  assert.ok(r.bodyGuide.renders <= S.BODY_GUIDE_MAX_RENDERS, `renders ${r.bodyGuide.renders}`)
-  const g = P.bodyGuideKnobs(r.bodyGuide)
+  assert.equal(r.bodyGuide, undefined)
+  const gr = S.measureVoxPressorGuides([x], SR, { ...kpAt(4.8), bodyGuidePrRange: P.bodyGuidePrRange() })
+  assert.ok(gr.bodyGuide.renders <= S.BODY_GUIDE_MAX_RENDERS, `renders ${gr.bodyGuide.renders}`)
+  const g = P.bodyGuideKnobs(gr.bodyGuide)
   assert.ok(g.edge > 0 && g.edge <= g.warn, `edge ${g.edge} warn ${g.warn}`)
   // The knobs read back what the guide says.
   if (g.edge < P.BODY_MAX) {
@@ -815,13 +829,13 @@ test('Body guide: amber where the LA-2A averages BODY_GUIDE_EDGE_DB, red at BODY
     assert.ok(Math.abs(at.bodyDb - S.BODY_GUIDE_WARN_DB) < 0.15, `at warn: ${at.bodyDb}`)
   }
   // Cached across Body moves; absent unless asked; the rest unchanged by it.
-  const again = S.measureVoxPressor([x], SR, { ...kpAt(8), bodyGuidePrRange: P.bodyGuidePrRange() })
-  assert.deepEqual(again.bodyGuide, r.bodyGuide)
+  const again = S.measureVoxPressorGuides([x], SR, { ...kpAt(8), bodyGuidePrRange: P.bodyGuidePrRange() })
+  assert.deepEqual(again.bodyGuide, gr.bodyGuide)
   const plain = S.measureVoxPressor([x], SR, kpAt(4.8))
-  assert.equal(plain.bodyGuide, undefined)
+  assert.equal(S.measureVoxPressorGuides([x], SR, kpAt(4.8)).bodyGuide, undefined)
   for (const k of VOX_MEASURED_KEYS) assert.deepEqual(plain[k], r[k], k)
   // A Peaks move changes what Body hears: re-solved (Peaks 8 leaves Body less to do).
-  const hot = S.measureVoxPressor([x], SR, { ...toKernelParams({ ...VOX_DEFAULTS, peaks: 8, body: 4.8, deEss: 0, parallel: 0, density: 0, alignDb }), bodyGuidePrRange: P.bodyGuidePrRange() })
+  const hot = S.measureVoxPressorGuides([x], SR, { ...toKernelParams({ ...VOX_DEFAULTS, peaks: 8, body: 4.8, deEss: 0, parallel: 0, density: 0, alignDb }), bodyGuidePrRange: P.bodyGuidePrRange() })
   assert.ok(hot.bodyGuide.renders > 0)
   // Mapping: PR to knob, clamped; not reached = the top.
   const m = P.bodyGuideKnobs({ edgePr: P.bodyPrFor(2.5), warnPr: null })

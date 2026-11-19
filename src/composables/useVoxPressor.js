@@ -5,7 +5,7 @@ import { registerChainPlugin } from './usePluginChain.js'
 import { useEntitlements } from './useEntitlements.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
-  applyVoxPressorRegion, computeVoxPressorMeasure, computeVoxPressorExact, computePeakCache,
+  applyVoxPressorRegion, computeVoxPressorMeasure, computeVoxPressorGuides, computeVoxPressorExact, computePeakCache,
 } from '../audio/processing.js'
 import { analysedWholeRegion, regionAlignDb } from '../audio/analysisWindow.js'
 import { getSegmentDuration } from '../audio/operations.js'
@@ -364,15 +364,35 @@ const copies = pluginCopies((copy, life) => {
           upKey, upKnobs, peaksKey, peaksKnobs: pKnobs,
         }
         solvedFor = key
-        if (guide) {
-          voxPeaksGuide.value = peaksGuideKnobs(r.peaksGuide)
-          voxBodyGuide.value = bodyGuideKnobs(r.bodyGuide)
-          followGuide()
-        }
+        // The rings after the readouts: their own worker call, so a new
+        // region's figures are not held back by the guides' searches.
+        if (guide) solveGuides(segments, start, end, kp, seq)
         return next
       } finally {
         if (seq === solveSeq) voxBusy.value = false
       }
+    }
+
+    /**
+     * The Peaks and Body rings (`measureVoxPressorGuides`), asked right after
+     * the measurement `seq` with the same params, so the worker reuses its
+     * Peaks → Body render. Dropped if another measurement has started since:
+     * that one asks for its own. Not awaited by `solve`, so it never holds
+     * `voxBusy` (the readouts' "measuring…").
+     */
+    async function solveGuides(segments, start, end, kp, seq) {
+      let g
+      try {
+        g = await computeVoxPressorGuides(
+          segments, start, end, kp, state.currentFile.sampleRate, state.currentFile.channels,
+        )
+      } catch {
+        return // a guide is advice: the rings keep their last colours
+      }
+      if (seq !== solveSeq) return
+      voxPeaksGuide.value = peaksGuideKnobs(g.peaksGuide)
+      voxBodyGuide.value = bodyGuideKnobs(g.bodyGuide)
+      followGuide()
     }
 
     /**

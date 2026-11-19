@@ -715,6 +715,18 @@ export function computeVoxPressorMeasure(segments, start, end, kernelParams, sam
 }
 
 /**
+ * VoxPressor's knob guides (`measureVoxPressorGuides`) on the same capped
+ * window as `computeVoxPressorMeasure`. Ask it right after a measurement with
+ * the same kernel params: the worker then reuses that measurement's Peaks →
+ * Body render, and the guides cost only their own searches.
+ */
+export function computeVoxPressorGuides(segments, start, end, kernelParams, sampleRate, channels) {
+  return measureInWorker(
+    'voxPressorGuides', segments, start, end, kernelParams, sampleRate, channels,
+  ).then(({ type, ...d }) => d)
+}
+
+/**
  * VoxPressor's per-stage peak restores, measured EXACTLY over the whole region
  * — for a region longer than the solve's analysis window. Resolves the solved
  * params with the restores, ceilings and Body offset corrected. See
