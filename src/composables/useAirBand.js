@@ -203,4 +203,3 @@ export function useAirBand(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useAirBand.builtCopies = () => copies.built()
-useAirBand.copySerial = copy => copies.serial(copy)

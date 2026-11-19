@@ -601,4 +601,3 @@ export function useDeEsser(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useDeEsser.builtCopies = () => copies.built()
-useDeEsser.copySerial = copy => copies.serial(copy)

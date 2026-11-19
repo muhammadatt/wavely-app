@@ -290,6 +290,9 @@ const copies = pluginCopies((copy, life) => {
       // measured, and recorded under a key no real revision matches.
       const own = segments === state.segments
       const key = own ? timelineKey() : `${appState.activeDocumentId}:chain`
+      // A manual trim met on a different document goes back to AUTO, as in
+      // useLA2A.js — a fallback now: per-file settings re-bind the trim on a
+      // tab switch before this runs (perFilePluginSettings.js).
       const sameDoc = fetAlignedFor !== null
         && fetAlignedFor.split(':')[0] === String(appState.activeDocumentId)
       if (!fetInputAuto.value) {
@@ -713,4 +716,3 @@ export function useFET1176(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useFET1176.builtCopies = () => copies.built()
-useFET1176.copySerial = copy => copies.serial(copy)

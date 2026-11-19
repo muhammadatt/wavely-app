@@ -7,6 +7,9 @@ import { register } from 'node:module'
  * a tab switch saves the settings of the file being left and restores the ones
  * of the file being entered; a file with nothing saved keeps the last-used
  * settings (owner, November 2026). Same loader stub as pluginSettings.test.js.
+ *
+ * The CHAIN's per-file layout needs live audio nodes, so `npm run smoke`
+ * drives it in Chromium (its "Per-file chain" step).
  */
 const HOOKS = `
 const SRC = ${JSON.stringify(new URL('../../src/', import.meta.url).href)}
@@ -26,7 +29,7 @@ export async function load(url, context, next) {
 register('data:text/javascript,' + encodeURIComponent(HOOKS))
 
 const { pluginSettingsIO } = await import('../../src/composables/pluginSettings.js')
-const { pluginCopies } = await import('../../src/composables/pluginCopies.js')
+const { useLA2A } = await import('../../src/composables/useLA2A.js')
 const { useEditorState } = await import('../../src/composables/useEditorState.js')
 const per = await import('../../src/composables/perFilePluginSettings.js')
 
@@ -46,17 +49,6 @@ test('each file keeps its own settings; a new file inherits the last used', () =
   assert.equal(effectOf(), 20, 'C inherits what was last used (on A)')
   per.onActiveDocumentChanged('B', 'C', ['A', 'B', 'C'])
   assert.equal(effectOf(), 70, 'back on B: its own settings')
-})
-
-test('chain copies are per file too', () => {
-  per.resetPerFilePluginSettings()
-  setEffect(10, 'chain-1')
-  per.onActiveDocumentChanged('B', 'A', ['A', 'B'])
-  setEffect(90, 'chain-1')
-  per.onActiveDocumentChanged('A', 'B', ['A', 'B'])
-  assert.equal(effectOf('chain-1'), 10)
-  per.onActiveDocumentChanged('B', 'A', ['A', 'B'])
-  assert.equal(effectOf('chain-1'), 90)
 })
 
 test('a closed file forgets its settings and is not saved on the way out', () => {
@@ -89,17 +81,29 @@ test('the installed watcher follows the editor\'s active document', () => {
   appState.activeDocumentId = null
 })
 
-test('pluginCopies reports built copies and a new serial for a rebuilt copy', () => {
-  const lives = new Map()
-  const get = pluginCopies((copy, life) => { lives.set(copy, life); return {} })
-  assert.deepEqual(get.built(), [])
-  assert.equal(get.serial('chain-1'), 0)
-  get('chain-1')
-  assert.deepEqual(get.built(), ['chain-1'])
-  const first = get.serial('chain-1')
-  assert.ok(first > 0)
-  lives.get('chain-1').dispose()   // the slot is removed…
-  assert.deepEqual(get.built(), [])
-  get('chain-1')                   // …and added again
-  assert.notEqual(get.serial('chain-1'), first)
+test('a manual INPUT trim belongs to its file, and a new file inherits it', () => {
+  per.resetPerFilePluginSettings()
+  const la2a = useLA2A('solo')
+  const trim = () => (la2a.la2aInputAuto.value ? 'AUTO' : la2a.la2aInputDb.value)
+  la2a.syncInput(6)                                    // dialled by hand on A
+  per.onActiveDocumentChanged('B', 'A', ['A', 'B'])
+  assert.equal(trim(), 6, 'B has nothing saved: it inherits the manual trim')
+  la2a.syncInput(-4)                                   // re-dialled on B
+  per.onActiveDocumentChanged('A', 'B', ['A', 'B'])
+  assert.equal(trim(), 6, 'A keeps its own')
+  la2a.resetInputAuto()                                // A handed back to AUTO
+  per.onActiveDocumentChanged('B', 'A', ['A', 'B'])
+  assert.equal(trim(), -4, 'B keeps its own')
+  per.onActiveDocumentChanged('A', 'B', ['A', 'B'])
+  assert.equal(trim(), 'AUTO', 'A is back on AUTO')
+})
+
+test('presets and saved chains still never carry the trim', async () => {
+  const { pluginSettingsIO, chainSettingsOf } = await import('../../src/composables/pluginSettings.js')
+  const la2a = useLA2A('solo')
+  la2a.syncInput(9)
+  const read = pluginSettingsIO('opto-smooth', 'solo').read()
+  assert.ok(!('inputDb' in read) && !('inputAuto' in read))
+  assert.ok(!('inputDb' in (chainSettingsOf('opto-smooth', read) ?? {})))
+  la2a.resetInputAuto()
 })

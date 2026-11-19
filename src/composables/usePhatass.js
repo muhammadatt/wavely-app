@@ -671,4 +671,3 @@ export function usePhatass(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 usePhatass.builtCopies = () => copies.built()
-usePhatass.copySerial = copy => copies.serial(copy)

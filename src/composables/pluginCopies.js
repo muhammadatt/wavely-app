@@ -78,8 +78,6 @@ export function currentPluginCopy() {
  * @param {(copy: PluginCopy, life: { scope: import('vue').EffectScope, onDispose: (fn: () => void) => void, dispose: () => void }) => T} define
  * @returns {((copy?: PluginCopy) => T)}
  */
-let copySerial = 0
-
 export function pluginCopies(define) {
   const copies = new Map()
 
@@ -100,7 +98,7 @@ export function pluginCopies(define) {
           scope.stop()
         },
       }
-      entry = { life, serial: ++copySerial }
+      entry = { life }
       copies.set(copy, entry)
       try {
         entry.use = scope.run(() => define(copy, life))
@@ -117,12 +115,6 @@ export function pluginCopies(define) {
 
   /** The copies built so far ('solo', 'chain-<n>'), without building any. */
   get.built = () => [...copies.keys()]
-  /**
-   * Which build of `copy` is live: a number that changes when a disposed copy
-   * is built again (a chain slot removed and re-added), or 0 when unbuilt. Lets
-   * state saved against one build tell that it does not belong to the next.
-   */
-  get.serial = copy => copies.get(copy)?.serial ?? 0
 
   return get
 }

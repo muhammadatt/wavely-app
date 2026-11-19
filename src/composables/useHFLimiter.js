@@ -257,4 +257,3 @@ export function useHFLimiter(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useHFLimiter.builtCopies = () => copies.built()
-useHFLimiter.copySerial = copy => copies.serial(copy)

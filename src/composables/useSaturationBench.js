@@ -346,4 +346,3 @@ export function useSaturationBench(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useSaturationBench.builtCopies = () => copies.built()
-useSaturationBench.copySerial = copy => copies.serial(copy)

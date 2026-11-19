@@ -552,4 +552,3 @@ export function useScheps(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useScheps.builtCopies = () => copies.built()
-useScheps.copySerial = copy => copies.serial(copy)

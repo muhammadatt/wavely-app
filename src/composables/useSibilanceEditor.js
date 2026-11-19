@@ -425,7 +425,6 @@ export function useSibilanceEditor(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useSibilanceEditor.builtCopies = () => copies.built()
-useSibilanceEditor.copySerial = copy => copies.serial(copy)
 
 /**
  * Split the sparse tuning overrides into what the route expects.

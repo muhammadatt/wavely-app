@@ -626,4 +626,3 @@ export function useResonance(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useResonance.builtCopies = () => copies.built()
-useResonance.copySerial = copy => copies.serial(copy)

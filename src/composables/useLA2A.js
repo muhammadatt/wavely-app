@@ -395,6 +395,12 @@ const copies = pluginCopies((copy, life) => {
        *
        * Keyed on the DOCUMENT, not the revision, so editing the file the user
        * trimmed by hand leaves their setting alone.
+       *
+       * ⚠ A TAB SWITCH NO LONGER REACHES THIS RESET. Per-file settings
+       * (perFilePluginSettings.js) write the entered file's own trim — or,
+       * for a file with nothing saved, re-dial the last-used one — before
+       * this runs, which binds it to the new document. What is left here is
+       * the fallback for any other path onto a different document.
        */
       const sameDoc = alignedFor !== null
         && alignedFor.split(':')[0] === String(appState.activeDocumentId)
@@ -776,4 +782,3 @@ export function useLA2A(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useLA2A.builtCopies = () => copies.built()
-useLA2A.copySerial = copy => copies.serial(copy)

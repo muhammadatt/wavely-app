@@ -789,4 +789,3 @@ export function useVoxPressor(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useVoxPressor.builtCopies = () => copies.built()
-useVoxPressor.copySerial = copy => copies.serial(copy)

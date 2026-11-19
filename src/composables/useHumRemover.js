@@ -328,4 +328,3 @@ export function useHumRemover(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useHumRemover.builtCopies = () => copies.built()
-useHumRemover.copySerial = copy => copies.serial(copy)

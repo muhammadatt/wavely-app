@@ -306,4 +306,3 @@ export function usePlosive(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 usePlosive.builtCopies = () => copies.built()
-usePlosive.copySerial = copy => copies.serial(copy)
