@@ -21,6 +21,8 @@
  * thread everywhere).
  */
 
+import { resample } from '../audio/dsp/resample.js'
+
 export const ROOT_DIR = 'wavely-autosave'
 export const CHUNK_BYTES = 8 * 1024 * 1024
 const LOCK_PREFIX = 'wavely-autosave:'
@@ -75,8 +77,11 @@ export async function openSessionStore({ sessionId, nav = globalThis.navigator }
     let first = true
     try {
       for await (const bytes of chunks) {
+        // Read the length BEFORE the transfer: transferring detaches the
+        // buffer, and its byteLength reads 0 afterwards.
+        const length = bytes.byteLength
         await send({ op: 'write', path, at, bytes, first, last: false }, [bytes])
-        at += bytes.byteLength
+        at += length
         first = false
       }
       await send({ op: 'write', path, at, bytes: null, first, last: true })
@@ -127,15 +132,27 @@ export async function openSessionStore({ sessionId, nav = globalThis.navigator }
 
     /**
      * Replace a gone tab's manifest with `manifest` (what is still to be
-     * restored after a partial restore). Written to slot a first and slot b
-     * removed after, so a write cut short leaves the old, whole manifest:
-     * the next restore may offer a file again, but never loses one.
+     * restored after a partial restore). Written to the slot the newest
+     * readable manifest is NOT in, and that one removed only once the new one
+     * is flushed — so a write cut short leaves the old, whole manifest: the
+     * next restore may offer a file again, but never loses one.
      */
     async replaceManifest(otherSessionId, manifest) {
-      const bytes = new TextEncoder().encode(JSON.stringify(manifest)).buffer
+      const name = slot => `${otherSessionId}.${slot}.json`
+      let newest = null
+      let newestAt = -Infinity
+      for (const slot of ['a', 'b']) {
+        try {
+          const handle = await sessionsDir.getFileHandle(name(slot))
+          const old = JSON.parse(await (await handle.getFile()).text())
+          if ((old.savedAt ?? 0) > newestAt) { newest = slot; newestAt = old.savedAt ?? 0 }
+        } catch { /* missing or torn: not the one to keep */ }
+      }
+      const target = newest === 'a' ? 'b' : 'a'
+      const bytes = new TextEncoder().encode(JSON.stringify({ ...manifest, savedAt: Math.max(manifest.savedAt ?? 0, newestAt + 1) })).buffer
       async function* one() { yield bytes }
-      await writeChunks([ROOT_DIR, 'sessions', `${otherSessionId}.a.json`], one())
-      await sessionsDir.removeEntry(`${otherSessionId}.b.json`).catch(() => {})
+      await writeChunks([ROOT_DIR, 'sessions', name(target)], one())
+      await sessionsDir.removeEntry(name(target === 'a' ? 'b' : 'a')).catch(() => {})
     },
 
     /** Every manifest on disk except this tab's, newest slot of each, with whether its tab is still open. */
@@ -179,12 +196,18 @@ export async function openSessionStore({ sessionId, nav = globalThis.navigator }
         // The stored bytes stand in for the original file from now on.
         return { buffer: decoded, sourceFile: new File([file], meta.name, { type: meta.type }) }
       }
-      const out = ctx.createBuffer(meta.channels, meta.length, meta.sampleRate)
+      // Every buffer on a timeline is at the AudioContext's rate (a file's
+      // bytes decode to it, above). Samples stored at another rate — the
+      // output device changed since — are resampled to match, or a timeline
+      // mixing the two would play and render at the wrong pitch.
       const bytesPer = meta.length * 4
+      const channels = []
       for (let c = 0; c < meta.channels; c++) {
-        const ab = await file.slice(c * bytesPer, (c + 1) * bytesPer).arrayBuffer()
-        out.copyToChannel(new Float32Array(ab), c)
+        const samples = new Float32Array(await file.slice(c * bytesPer, (c + 1) * bytesPer).arrayBuffer())
+        channels.push(meta.sampleRate === ctx.sampleRate ? samples : resample(samples, meta.sampleRate, ctx.sampleRate))
       }
+      const out = ctx.createBuffer(meta.channels, channels[0].length, ctx.sampleRate)
+      channels.forEach((d, c) => out.copyToChannel(d, c))
       return { buffer: out, sourceFile: null }
     },
 

@@ -80,7 +80,7 @@ function savedAgo(ms) {
         <button v-if="!confirmingDiscard" type="button" class="try-own" :disabled="autosave.restoring" @click="confirmingDiscard = true">Discard</button>
         <div v-else class="recovery-confirm">
           <span>This deletes the only copy.</span>
-          <button type="button" class="try-own danger" @click="discard(); confirmingDiscard = false">Discard for good</button>
+          <button type="button" class="try-own danger" :disabled="autosave.restoring" @click="discard(); confirmingDiscard = false">Discard for good</button>
           <button type="button" class="try-own" @click="confirmingDiscard = false">Keep</button>
         </div>
       </div>

@@ -311,7 +311,8 @@ export function useSessionAutosave() {
 
   /** Throw away the work left by tabs that are gone. */
   async function discard() {
-    if (!store) return
+    // Never while a restore is reading the files it would delete.
+    if (!store || autosave.restoring) return
     // Their buffers belong to tabs that are gone, so nobody can be mid-write on
     // them: delete the ones no remaining manifest names now, not after the grace.
     const dropped = new Set()

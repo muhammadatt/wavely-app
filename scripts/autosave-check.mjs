@@ -20,15 +20,22 @@ import { join } from 'node:path'
 const PORT = Number(process.env.PORT ?? 5241)
 const URL_ = `http://localhost:${PORT}/`
 
-/** 10 s of a 220 Hz tone, mono 16-bit 48 kHz. */
+/**
+ * 10 s, stereo 16-bit 48 kHz: 220 Hz on the left, 330 Hz at half level on the
+ * right. Two different channels, so an apply's output is stored as two
+ * separate chunks and a restore that mixed them up would show.
+ */
 function writeWav(path, seconds = 10, rate = 48000) {
   const n = seconds * rate
-  const b = Buffer.alloc(44 + n * 2)
-  b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8)
-  b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22)
-  b.writeUInt32LE(rate, 24); b.writeUInt32LE(rate * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34)
-  b.write('data', 36); b.writeUInt32LE(n * 2, 40)
-  for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 220 * i / rate)), 44 + i * 2)
+  const b = Buffer.alloc(44 + n * 4)
+  b.write('RIFF', 0); b.writeUInt32LE(36 + n * 4, 4); b.write('WAVEfmt ', 8)
+  b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(2, 22)
+  b.writeUInt32LE(rate, 24); b.writeUInt32LE(rate * 4, 28); b.writeUInt16LE(4, 32); b.writeUInt16LE(16, 34)
+  b.write('data', 36); b.writeUInt32LE(n * 4, 40)
+  for (let i = 0; i < n; i++) {
+    b.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 220 * i / rate)), 44 + i * 4)
+    b.writeInt16LE(Math.round(4000 * Math.sin(2 * Math.PI * 330 * i / rate)), 46 + i * 4)
+  }
   writeFileSync(path, b)
 }
 
@@ -105,7 +112,7 @@ try {
   const afterCut = await storage()
   check(afterCut.sessions.length === 1 && afterCut.sessions[0].files[0] === 'wavely-autosave-check.wav', 'after a cut, the file is in this tab\'s manifest')
   const bin = afterCut.buffers.find(b => b.name.endsWith('.bin'))
-  check(bin?.bytes === 960044, `the opened file is kept as its own bytes, the WAV itself (${bin?.bytes} bytes), not decoded samples`)
+  check(bin?.bytes === 1920044, `the opened file is kept as its own bytes, the WAV itself (${bin?.bytes} bytes), not decoded samples`)
 
   // An apply: −3 dB over everything, which makes a new buffer.
   await page.getByRole('button', { name: /^Level/ }).first().click()
@@ -116,6 +123,16 @@ try {
   await page.getByRole('button', { name: /Apply Volume Change/ }).click()
   await page.waitForTimeout(4000)
 
+  /** The active file's audio at a few points, per channel (the apply's output). */
+  const probe = () => page.evaluate(async () => {
+    const { useEditorState } = await import('/src/composables/useEditorState.js')
+    const { renderRegionToBuffer } = await import('/src/audio/processing.js')
+    const { state } = useEditorState()
+    const ch = renderRegionToBuffer(state.segments, 0, 8, state.currentFile.sampleRate, state.currentFile.channels)
+    const at = [1000, 50000, 150000, 300000]
+    return { channels: ch.length, samples: ch.map(c => at.map(i => c[i])), peaks: ch.map(c => c.reduce((m, v) => Math.max(m, Math.abs(v)), 0)) }
+  })
+  const applied = await probe()
   const before = await storage()
   check(before.buffers.some(b => b.name.endsWith('.f32')), 'the apply\'s output is kept as samples (.f32)')
   check(!before.buffers.some(b => b.name.endsWith('.bin')), 'the original\'s bytes are dropped once no unsaved timeline plays them')
@@ -147,6 +164,9 @@ try {
   await page.waitForTimeout(300)
   const sel = await clock()
   check(/8[.:,]0/.test(sel) || /0:08/.test(sel), `the restored timeline is the edited length (${sel.replace(/\s+/g, ' ')})`)
+  const restoredAudio = await probe()
+  const same = applied.channels === 2 && restoredAudio.channels === 2 && applied.samples.every((c, i) => c.every((v, j) => Math.abs(v - restoredAudio.samples[i][j]) < 1e-6))
+  check(same, `the restored stereo audio is sample-identical to what was applied (peaks ${applied.peaks.map(p => p.toFixed(3))} → ${restoredAudio.peaks.map(p => p.toFixed(3))})`)
   await page.waitForTimeout(2500)
   const afterRestore = await storage()
   check(afterRestore.sessions.length === 1, 'one manifest remains: this tab\'s, now naming the restored file')
