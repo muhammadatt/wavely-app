@@ -24,6 +24,7 @@ import {
 } from '../audio/sessionSnapshot.js'
 import { computePeakCache } from '../audio/processing.js'
 import { isMobileDevice, memoryBudget } from '../platform/memoryBudget.js'
+import { useServerJobs } from './useServerJobs.js'
 
 export const SAVE_DELAY_MS = 1500
 /** A buffer file no manifest names is deleted once it is this old (another tab may be mid-write). */
@@ -55,8 +56,13 @@ export function useSessionAutosave() {
   const editor = useEditorState()
   const { appState } = editor
 
+  // A file a server job is working on is kept too, edits or not, so the
+  // result has its file to land on after a reload (useServerJobs.js).
+  const { pendingDocIds } = useServerJobs()
+  const keep = d => hasUnsavedEdits(d) || pendingDocIds.value.has(d.id)
+
   const signature = computed(() =>
-    appState.documents.map(d => `${d.id}:${d.revision}:${d.savedRevision}:${d.name}`).join('|'))
+    appState.documents.map(d => `${d.id}:${d.revision}:${d.savedRevision}:${d.name}:${keep(d)}`).join('|'))
 
   async function start() {
     if (started) return
@@ -105,7 +111,7 @@ export function useSessionAutosave() {
       // Store every buffer an unsaved timeline plays, then name them. Edits can
       // land while a buffer is being written, so check again until nothing new.
       for (let pass = 0; pass < 5; pass++) {
-        const needed = [...bufferIdsOf(appState.documents.filter(hasUnsavedEdits))].filter(id => !stored.has(id))
+        const needed = [...bufferIdsOf(appState.documents.filter(keep))].filter(id => !stored.has(id))
         if (needed.length === 0) break
         for (const id of needed) {
           const buffer = editor.bufferPool.get(id)
@@ -119,6 +125,7 @@ export function useSessionAutosave() {
         sessionId: store.sessionId,
         documents: appState.documents.filter(d => bufferIdsOfDoc(d).every(id => stored.has(id))),
         describe: id => stored.get(id),
+        keep,
       })
       if (manifest.docs.length > 0) {
         await store.writeManifest(manifest)

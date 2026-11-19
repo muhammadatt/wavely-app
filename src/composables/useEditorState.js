@@ -566,8 +566,11 @@ export function useEditorState() {
    * Create a document from a decoded buffer and make it active.
    * @returns {{ docId: string, bufferId: string }}
    */
-  function createDocument(name, audioBuffer, { activate = true, sourceFormat = null, sourceHandle = null, sourceFile = null } = {}) {
+  function createDocument(name, audioBuffer, { activate = true, sourceFormat = null, sourceHandle = null, sourceFile = null, unsaved = false } = {}) {
     const doc = makeDocument(name, audioBuffer, sourceFormat)
+    // Audio that exists nowhere on disk (a server result with no file to land
+    // on) opens unsaved, so autosave keeps it and closing it asks first.
+    if (unsaved) doc.savedRevision = -1
     if (sourceHandle) docSourceHandles.set(doc.id, sourceHandle)
     appState.documents.push(doc)
 

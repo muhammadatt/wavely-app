@@ -4,6 +4,8 @@ import { useEntitlements } from './useEntitlements.js'
 import { useWindows } from './useWindows.js'
 import { computePeakCache, renderRegionToBuffer } from '../audio/processing.js'
 import { denoiseRegion } from '../api/noiseReduction.js'
+import { useServerJobs } from './useServerJobs.js'
+import { timelineKey } from '../audio/serverJobRecord.js'
 import {
   NOISE_REDUCTION_DEFAULTS,
   NR_ENGINE_LABELS,
@@ -170,6 +172,13 @@ export function useNoiseReduction() {
     startProcessing(`Reducing noise (${engineLabel})`, pin.docId)
     r.timer = setInterval(() => renderStage(r), 1000)
     const cancelled = () => run !== r
+    // Recorded once the server accepts it, so a reload or a closed tab can pick
+    // the job up again (useServerJobs.js). Ended in the finally: committed,
+    // failed and cancelled alike.
+    const tracked = useServerJobs().beginJob({
+      kind: 'noiseReduction', docId: pin.docId, name: state.name, timeline: timelineKey(state.segments),
+      start, end, sampleRate, channels, extra: { mix: settings.mix, engine: settings.engine },
+    })
     try {
       let wet
       if (reuse) {
@@ -180,6 +189,7 @@ export function useNoiseReduction() {
           params: settings,
           isCancelled: cancelled,
           onStage: (stage, text) => showStage(r, stage, text),
+          onSubmitted: tracked.submitted,
         })
         if (!out || cancelled()) return false
         wet = out.wet
@@ -220,6 +230,7 @@ export function useNoiseReduction() {
       else if (!entitlements.handleServerRefusal(err)) showToast(err.message || 'Noise reduction failed')
       return false
     } finally {
+      tracked.end()
       finishRun(r)
     }
   }

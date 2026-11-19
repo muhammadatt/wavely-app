@@ -11,11 +11,11 @@
  *   Production: set VITE_API_BASE_URL=https://your-vps-domain.com
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
 import { uploadAudio, postWithUpload } from './uploadAudio.js'
 import { pollJob } from './pollJob.js'
+import { fetchJobStatus, downloadJob } from './jobs.js'
 
 
 /**
@@ -31,12 +31,13 @@ import { pollJob } from './pollJob.js'
  * @param {Function} [options.onProgress]    - Called with progress string on each poll
  * @param {Function} [options.onUploadProgress] - (fraction 0–1) while the audio uploads
  * @param {Function} [options.onUploaded]    - Called once the upload has finished
+ * @param {Function} [options.onSubmitted]   - Called with the jobId once the server has accepted the job
  * @returns {Promise<{ report: object, audioBlob: Blob, peaks: object[] }>}
  */
 export async function processAudioOnServer({
   segments, sampleRate, channels, fileName, presetId, outputProfileId,
   separationModel, resembleMode, voiceFixerMode,
-  onProgress, onUploadProgress, onUploaded,
+  onProgress, onUploadProgress, onUploaded, onSubmitted,
 }) {
   // ── 1. Render timeline to WAV blob ─────────────────────────────────────────
   const wavBlob = await renderTimelineToWavBlob(segments, sampleRate, channels)
@@ -61,27 +62,13 @@ export async function processAudioOnServer({
     ...(voiceFixerMode != null ? { voicefixer_mode: String(voiceFixerMode) } : {}),
   }, 'Submit failed')
   const { jobId } = await submitRes.json()
+  onSubmitted?.(jobId)
 
   // ── 3. Poll for completion ─────────────────────────────────────────────────
-  const job = await pollJob({
-    fetchStatus: async () => {
-      const pollRes = await fetch(`${API_BASE}/api/jobs/${jobId}`)
-      if (!pollRes.ok) {
-        const body = await pollRes.json().catch(() => ({}))
-        throw new Error(body.error || `Status check failed: ${pollRes.status}`)
-      }
-      return pollRes.json()
-    },
-    onProgress,
-  })
+  const job = await pollJob({ fetchStatus: () => fetchJobStatus(jobId), onProgress })
 
   // ── 4. Download audio ──────────────────────────────────────────────────────
-  const dlRes = await fetch(`${API_BASE}/api/jobs/${jobId}/download`)
-  if (!dlRes.ok) {
-    const body = await dlRes.json().catch(() => ({}))
-    throw new Error(body.error || `Audio download failed: ${dlRes.status}`)
-  }
-  const audioBlob = await dlRes.blob()
+  const audioBlob = await downloadJob(jobId, 'Audio download failed')
 
   return { report: job.report, peaks: job.peaks, audioBlob }
 }

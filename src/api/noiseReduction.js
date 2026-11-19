@@ -11,11 +11,9 @@
 import { renderRegionToBuffer, floatChannelsToWavBlob } from '../audio/processing.js'
 import { decodeWav } from '../audio/wavDecode.js'
 import { toServerParams } from '../audio/noiseReductionParams.js'
-import { serverError } from './serverError.js'
 import { uploadAudio, postWithUpload, discardAudioUpload } from './uploadAudio.js'
 import { pollJob } from './pollJob.js'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+import { fetchJobStatus, downloadJob } from './jobs.js'
 
 const POLL_INTERVAL_MS = 1000
 // Polls spent processing (30 min) and, separately, polls spent waiting in the
@@ -45,13 +43,15 @@ const CANCELLED = Symbol('cancelled')
  *                                        percentage), 'denoise' (with the
  *                                        server's progress text, if any),
  *                                        'download'
+ * @param {Function} [options.onSubmitted] called with the jobId once the
+ *                                        server has accepted the job
  * @returns {Promise<{ dry: Float32Array[], wet: Float32Array[], report: object|null } | null>}
  *   `dry` is what was sent, `wet` the server's result fitted to the same length
  *   and channel count; null when cancelled
  */
 export async function denoiseRegion({
   segments, start, end, sampleRate, channels, params, isCancelled = () => false,
-  onStage = () => {},
+  onStage = () => {}, onSubmitted = () => {},
 }) {
   onStage('upload')
   const dry = renderRegionToBuffer(segments, start, end, sampleRate, channels)
@@ -88,6 +88,7 @@ export async function denoiseRegion({
     uploadId, params: JSON.stringify(toServerParams(params)),
   }, 'Noise reduction failed')
   const { jobId } = await submit.json()
+  onSubmitted(jobId)
   if (isCancelled()) return null
   onStage('denoise', null)
 
@@ -100,9 +101,7 @@ export async function denoiseRegion({
       onProgress: progress => onStage('denoise', progress),
       fetchStatus: async () => {
         if (isCancelled()) throw CANCELLED
-        const poll = await fetch(`${API_BASE}/api/jobs/${jobId}`)
-        if (!poll.ok) throw await serverError(poll, 'Noise reduction status check failed')
-        return poll.json()
+        return fetchJobStatus(jobId, 'Noise reduction status check failed')
       },
     })
   } catch (err) {
@@ -113,14 +112,20 @@ export async function denoiseRegion({
   if (isCancelled()) return null
 
   onStage('download')
-  const download = await fetch(`${API_BASE}/api/jobs/${jobId}/download`)
-  if (!download.ok) throw await serverError(download, 'Noise reduction download failed')
-  const decoded = decodeWav(await download.arrayBuffer())
+  const blob = await downloadJob(jobId, 'Noise reduction download failed')
+  return { dry, wet: await denoisedFromBlob(blob, dry, sampleRate), report: job.report ?? null }
+}
+
+/**
+ * The server's WAV as channels fitted to `dry` (what was sent). Also used by a
+ * job resumed after a reload (src/composables/useServerJobs.js).
+ */
+export async function denoisedFromBlob(blob, dry, sampleRate) {
+  const decoded = decodeWav(await blob.arrayBuffer())
   if (decoded.sampleRate !== sampleRate) {
     throw new Error(`Noise reduction came back at ${decoded.sampleRate} Hz, expected ${sampleRate} Hz`)
   }
-
-  return { dry, wet: fitToDry(decoded.channels, dry), report: job.report ?? null }
+  return fitToDry(decoded.channels, dry)
 }
 
 /**

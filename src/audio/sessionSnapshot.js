@@ -67,9 +67,11 @@ export function hasUnsavedEdits(doc) {
  * The manifest for a tab: its documents with unsaved edits, and how each
  * buffer they use is stored (`describe(id)` → `{ kind: 'file', … }` or
  * `{ kind: 'pcm', … }`, from the store's own record of what it wrote).
+ * `keep` widens which documents go in (autosave also keeps a file a server
+ * job is working on).
  */
-export function buildManifest({ sessionId, documents, describe, now = Date.now() }) {
-  const docs = documents.filter(hasUnsavedEdits).map(snapshotDocument)
+export function buildManifest({ sessionId, documents, describe, keep = hasUnsavedEdits, now = Date.now() }) {
+  const docs = documents.filter(keep).map(snapshotDocument)
   const buffers = {}
   for (const id of bufferIdsOf(docs)) buffers[id] = describe(id)
   return { version: MANIFEST_VERSION, sessionId, savedAt: now, docs, buffers }

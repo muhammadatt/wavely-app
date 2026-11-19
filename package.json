@@ -68,7 +68,8 @@
     "fet:release-depth:selftest": "node scripts/fet-release-depth.mjs --selftest",
     "fet:ballistics:selftest": "node scripts/fet-ballistics.mjs --fit --selftest",
     "la2a:curve": "node scripts/la2a-curve-bench.mjs",
-    "la2a:curve:selftest": "node scripts/la2a-curve-bench.mjs --selftest"
+    "la2a:curve:selftest": "node scripts/la2a-curve-bench.mjs --selftest",
+    "jobs:check": "node scripts/server-jobs-check.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
