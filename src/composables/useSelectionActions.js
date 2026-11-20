@@ -6,14 +6,26 @@
  * and Trim run the registry's `quick` action, which the Trim / Silence panels
  * and the right-click menu use too.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useOperationDispatch } from './useOperationDispatch.js'
 import { getOperation } from '../ui/registry.js'
+import { nudgeStep, nudgedSelection } from '../audio/selectionDrag.js'
+
+// The waveform's zoom, which the nudge step follows: WaveformArea announces
+// every view change as `wavely:view-update`. One listener for the app.
+const viewPps = ref(100)
+if (typeof window !== 'undefined') {
+  window.addEventListener('wavely:view-update', (e) => {
+    const pps = e.detail?.pixelsPerSecond
+    if (Number.isFinite(pps) && pps > 0) viewPps.value = pps
+  })
+}
 
 export function useSelectionActions() {
   const {
     state, hasSelection, hasClipboard, performCut, performCopy, performPaste, showToast,
+    totalDuration,
   } = useEditorState()
   const { dispatch } = useOperationDispatch()
 
@@ -45,5 +57,14 @@ export function useSelectionActions() {
     dispatch(getOperation('trim'), { quick: true })
   }
 
-  return { busy, copy, cut, paste, silence, trim }
+  /** Seconds one nudge moves an edge: ~3 px at the current zoom, a round number. */
+  const nudgeSeconds = computed(() => nudgeStep(viewPps.value))
+
+  /** Move the selection's `edge` ('start' | 'end') one step, `direction` −1 or +1. */
+  function nudge(edge, direction) {
+    if (!state.selection) return
+    state.selection = nudgedSelection(state.selection, edge, direction * nudgeSeconds.value, totalDuration.value)
+  }
+
+  return { busy, copy, cut, paste, silence, trim, nudge, nudgeSeconds }
 }

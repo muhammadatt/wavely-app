@@ -730,13 +730,27 @@ try {
       const length = () => pp.evaluate(async () =>
         (await import('/src/composables/useEditorState.js')).useEditorState().totalDuration.value)
 
-      // A touch drag selects, and the action bar shows it.
+      // A touch drag selects, with the magnifier up while the finger moves,
+      // and the action bar shows the selection.
+      const loupe = pp.locator('[data-testid=waveform-loupe]')
       await touch('touchStart', [[at(0.2), y]])
       for (let f = 0.25; f <= 0.5; f += 0.05) { await touch('touchMove', [[at(f), y]]); await pp.waitForTimeout(16) }
+      await pp.waitForTimeout(100)
+      if (!(await loupe.count())) why.push('no magnifier while a finger drags a selection; ')
       await touch('touchEnd', [])
       await pp.waitForTimeout(300)
+      if (await loupe.count()) why.push('the magnifier stayed up after the finger lifted; ')
       const bar = pp.locator('[data-testid=mobile-selection-bar]')
-      if (!/\d:\d\d\.\d\d – \d:\d\d\.\d\d/.test(await bar.innerText().catch(() => ''))) why.push('a touch drag did not show the selection bar; ')
+      if (!/\d:\d\d\.\d\d/.test(await bar.locator('[data-testid=edge-start]').innerText().catch(() => ''))) why.push('a touch drag did not show the selection bar; ')
+
+      // A tap on a nudge button moves that edge one step, and only that edge.
+      const sel = () => pp.evaluate(async () =>
+        ({ ...(await import('/src/composables/useEditorState.js')).useEditorState().state.selection }))
+      const s0 = await sel()
+      await bar.locator('[data-testid=nudge-start-fwd]').tap()
+      await pp.waitForTimeout(150)
+      const s1 = await sel()
+      if (!(s1.start > s0.start && s1.end === s0.end)) why.push('a nudge did not move the start edge alone; ')
 
       // Cut from the bar shortens the file.
       const lengthBefore = await length()

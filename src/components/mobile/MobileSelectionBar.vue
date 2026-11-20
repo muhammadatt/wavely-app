@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { useSelectionActions } from '../../composables/useSelectionActions.js'
 import Icon from '../ui/Icon.vue'
@@ -8,27 +8,86 @@ import Icon from '../ui/Icon.vue'
  * The selection's readout and its actions, in place of the desktop's
  * right-click menu. Shown while there is a selection, or something on the
  * clipboard to paste at the playhead.
+ *
+ * Each edge's time sits between ‹ › nudge buttons: a tap moves that edge one
+ * step (about 3 px at the current zoom, a round number — finer when zoomed
+ * in), and holding repeats, for the precision a finger cannot reach. A
+ * looping selection follows the nudge as it plays.
  */
 const { state, hasSelection, hasClipboard, clearSelection, selectAll } = useEditorState()
-const { busy, cut, copy, paste, silence, trim } = useSelectionActions()
+const { busy, cut, copy, paste, silence, trim, nudge, nudgeSeconds } = useSelectionActions()
+
+// Milliseconds once the step is finer than 10 ms, so a nudge always shows.
+const decimals = computed(() => (nudgeSeconds.value < 0.01 ? 3 : 2))
 
 function time(seconds) {
   const m = Math.floor(seconds / 60)
-  return `${m}:${(seconds % 60).toFixed(2).padStart(5, '0')}`
+  const d = decimals.value
+  return `${m}:${(seconds % 60).toFixed(d).padStart(d + 3, '0')}`
 }
 
 const readout = computed(() => {
   const sel = state.selection
   if (!sel) return null
-  return { range: `${time(sel.start)} – ${time(sel.end)}`, length: `${(sel.end - sel.start).toFixed(2)} s` }
+  return { start: time(sel.start), end: time(sel.end), length: `${(sel.end - sel.start).toFixed(decimals.value)} s` }
 })
+
+// ── Press and hold repeats ──────────────────────────────────────────────────
+const HOLD_DELAY_MS = 380
+const HOLD_EVERY_MS = 60
+let holdTimer = null
+
+function stopHold() {
+  clearTimeout(holdTimer)
+  clearInterval(holdTimer)
+  holdTimer = null
+}
+
+function startHold(edge, direction) {
+  stopHold()
+  nudge(edge, direction)
+  holdTimer = setTimeout(() => {
+    holdTimer = setInterval(() => nudge(edge, direction), HOLD_EVERY_MS)
+  }, HOLD_DELAY_MS)
+}
+
+// A keyboard press (Enter / Space) arrives as a click with no pointer.
+function keyNudge(e, edge, direction) {
+  if (e.detail === 0) nudge(edge, direction)
+}
+
+onBeforeUnmount(stopHold)
 </script>
 
 <template>
   <div class="m-sel" data-testid="mobile-selection-bar">
     <div class="m-sel-row">
       <template v-if="readout">
-        <span class="m-sel-range">{{ readout.range }}</span>
+        <div v-for="edge in ['start', 'end']" :key="edge" class="m-edge" :class="`m-edge-${edge}`">
+          <button
+            type="button"
+            class="m-nudge"
+            :aria-label="`Move the ${edge} earlier`"
+            :data-testid="`nudge-${edge}-back`"
+            @pointerdown.prevent="startHold(edge, -1)"
+            @pointerup="stopHold"
+            @pointerleave="stopHold"
+            @pointercancel="stopHold"
+            @click="keyNudge($event, edge, -1)"
+          >‹</button>
+          <span class="m-edge-time" :data-testid="`edge-${edge}`">{{ readout[edge] }}</span>
+          <button
+            type="button"
+            class="m-nudge"
+            :aria-label="`Move the ${edge} later`"
+            :data-testid="`nudge-${edge}-fwd`"
+            @pointerdown.prevent="startHold(edge, 1)"
+            @pointerup="stopHold"
+            @pointerleave="stopHold"
+            @pointercancel="stopHold"
+            @click="keyNudge($event, edge, 1)"
+          >›</button>
+        </div>
         <span class="m-sel-len">{{ readout.length }}</span>
         <button type="button" class="m-sel-x" aria-label="Clear selection" @click="clearSelection">
           <Icon name="close" :size="12" :stroke-width="2.5" />
@@ -62,15 +121,33 @@ const readout = computed(() => {
 .m-sel-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 4px;
-  min-height: 26px;
+  gap: 6px;
+  padding: 0 2px;
+  min-height: 30px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
 }
-.m-sel-range { font-size: 12px; font-weight: 600; color: #eaf6f8; }
-.m-sel-len { font-size: 11px; color: #e8a33d; }
+.m-edge { display: flex; align-items: center; gap: 2px; }
+.m-edge-end { order: 2; }
+.m-edge-time { font-size: 12px; font-weight: 600; color: #eaf6f8; min-width: 0; }
+.m-nudge {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255,255,255,.06);
+  color: #e8a33d;
+  font: 700 17px 'Inter', sans-serif;
+  line-height: 1;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.m-nudge:active { background: rgba(232,163,61,.2); }
+.m-sel-len { order: 1; flex: 1; text-align: center; font-size: 11px; color: #e8a33d; }
 .m-sel-hint { font: 500 12px 'Inter', sans-serif; color: rgba(255,255,255,.45); }
+.m-sel-x { order: 3; }
 .m-sel-x, .m-sel-all {
   margin-left: auto;
   border: none;
