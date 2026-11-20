@@ -94,7 +94,9 @@ export function nudgeStep(pps) {
 /**
  * The selection with one `edge` moved by `delta` seconds, kept inside
  * [0, `duration`] and never closer than `minLength` to the other edge (an edge
- * nudged into the other stops there rather than swapping sides).
+ * nudged into the other stops there rather than swapping sides). A selection
+ * already shorter than `minLength` (a touch drag can make one) keeps its own
+ * length as the floor, so a nudge never moves an edge the wrong way.
  *
  * @param {{start: number, end: number}} selection
  * @param {'start'|'end'} edge
@@ -102,7 +104,8 @@ export function nudgeStep(pps) {
  */
 export function nudgedSelection(selection, edge, delta, duration, minLength = NUDGE_MIN_S) {
   let { start, end } = selection
-  if (edge === 'start') start = Math.max(0, Math.min(end - minLength, start + delta))
-  else end = Math.min(duration, Math.max(start + minLength, end + delta))
+  const gap = Math.min(minLength, end - start)
+  if (edge === 'start') start = Math.max(0, Math.min(end - gap, start + delta))
+  else end = Math.min(duration, Math.max(start + gap, end + delta))
   return { start, end }
 }

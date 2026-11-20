@@ -74,6 +74,14 @@ test('a nudged edge stays in the file and never crosses the other edge', () => {
   assert.ok(near(pulled.end, 1 + NUDGE_MIN_S) && pulled.start === 1)
 })
 
+test('a selection shorter than the minimum never grows the wrong way', () => {
+  // A touch drag can leave a span under 1 ms; nudging an edge inward holds it.
+  assert.deepEqual(nudgedSelection({ start: 0, end: 0.0005 }, 'end', -0.001, 10), { start: 0, end: 0.0005 })
+  assert.deepEqual(nudgedSelection({ start: 1, end: 1.0005 }, 'start', 0.001, 10), { start: 1, end: 1.0005 })
+  // Outward still moves.
+  assert.ok(nudgedSelection({ start: 0, end: 0.0005 }, 'end', 0.001, 10).end > 0.0005)
+})
+
 test('the loupe lifts quiet audio so a gap shows its detail, within a limit', () => {
   assert.equal(loupeGain(Float32Array.from([-0.95, 0.95])), 1, 'loud audio is drawn true')
   assert.ok(near(loupeGain(Float32Array.from([-0.09, 0.045])), 10, 1e-5))
