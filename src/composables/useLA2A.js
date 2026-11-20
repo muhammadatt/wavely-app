@@ -1,5 +1,5 @@
-import { ref, watch } from 'vue'
-import { LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../audio/la2aProcessor.js'
+import { computed, ref, watch } from 'vue'
+import { SC_EMPH_MAX_DB, LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../audio/la2aProcessor.js'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
@@ -560,6 +560,25 @@ const copies = pluginCopies((copy, life) => {
      * tracker's extrema are stale.
      */
     const syncAnalog = (v) => syncCompressionParam('analog', la2aAnalog, v !== false)
+    /** HARMONICS (analog mode) on / off — colour, never the compression. */
+    const toggleAnalog = () => syncAnalog(!la2aAnalog.value)
+
+    /**
+     * HF EMPH is R37, the side-chain trimmer, turned the way the face reads:
+     * 0 = FLAT (R37 100, factory) to 100 = full emphasis (R37 0). It filters
+     * the SIDE-CHAIN, not the audio.
+     */
+    const la2aHfEmph = computed(() => 100 - la2aR37.value)
+    const syncHfEmph = (v) => syncR37(100 - v)
+
+    /**
+     * AUTO on: the measurement owns the INPUT trim again. AUTO off: the trim
+     * keeps the value AUTO had reached, now held by hand.
+     */
+    function setInputAuto(on) {
+      if (on) resetInputAuto()
+      else syncInput(la2aInputDb.value)
+    }
 
     /**
      * Touch-to-take-over: dragging the knob while AUTO is on switches AUTO off
@@ -758,6 +777,10 @@ const copies = pluginCopies((copy, life) => {
       syncR37,
       syncLookahead,
       syncAnalog,
+      toggleAnalog,
+      la2aHfEmph,
+      syncHfEmph,
+      setInputAuto,
       syncMix,
       toggleAutoMakeup,
       syncInput,
@@ -782,3 +805,8 @@ export function useLA2A(copy) {
 
 /** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
 useLA2A.builtCopies = () => copies.built()
+
+/** The side-chain shelf's gain above its corner at an HF EMPH position (0–100), dB. */
+export function hfEmphDb(emph) {
+  return SC_EMPH_MAX_DB * emph / 100
+}

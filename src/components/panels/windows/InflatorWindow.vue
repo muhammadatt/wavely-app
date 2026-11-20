@@ -13,7 +13,6 @@
  */
 import { computed } from 'vue'
 import { useInflator } from '../../../composables/useInflator.js'
-import { useEditorState } from '../../../composables/useEditorState.js'
 import { inflatorSettings } from '../../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../../composables/usePluginPresets.js'
 import { INFLATOR_PRESET_PLUGIN } from '../../../audio/pluginPresets/index.js'
@@ -34,7 +33,7 @@ defineProps({ z: { type: Number, default: 500 } })
 const pluginApi = useInflator()
 const {
   inInputDb, inEffect, inCurve, inOutputDb, inClip, inBandSplit,
-  inPreview, inInputLevels, inOutputLevels, inLiftDb,
+  inPreview, inInputLevels, inOutputLevels, inLiftDb, inMaxLiftDb,
   togglePreview, currentParams, applyParams,
   syncInputDb, syncEffect, syncCurve, syncOutputDb, syncClip, syncBandSplit,
   apply, teardown, closeModal,
@@ -59,20 +58,15 @@ const decibels = v => `${v > 0.05 ? '+' : ''}${v.toFixed(1)} dB`
 const percent = v => `${(v * 100).toFixed(1)} %`
 const signed = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 
-// The small-signal lift the settings give — Effect blends it in linearly in
-// amplitude: 1 + Effect·(f'(0) − 1). The ladder beside it is the lift being
-// applied right now, measured; this is the most it can be.
-const maxLiftDb = computed(() => {
-  const slope = 10 ** (inflatorLiftDb(inCurve.value) / 20)
-  return 20 * Math.log10(1 + inEffect.value * (slope - 1))
-})
+// The ladder beside the readout is the lift applied right now, measured;
+// `inMaxLiftDb` is the most it can be at these settings.
 // The ladder's full scale: the largest lift any setting gives (Curve +50, Effect 100 %).
 const LIFT_FULL_DB = inflatorLiftDb(CURVE_MAX_PCT)
 const liftValues = computed(() => {
   const v = inLiftDb.value.length ? inLiftDb.value : [0]
   return (v.length === 1 ? [v[0], v[0]] : v).map(db => db / LIFT_FULL_DB)
 })
-const liftText = computed(() => (inPreview.value ? `+${maxLiftDb.value.toFixed(1)} dB` : 'OFF'))
+const liftText = computed(() => (inPreview.value ? `+${inMaxLiftDb.value.toFixed(1)} dB` : 'OFF'))
 </script>
 
 <template>

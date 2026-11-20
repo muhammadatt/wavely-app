@@ -22,6 +22,13 @@ import { createPeakHold, createReadoutThrottle } from '../components/meters/ball
 import { tuningEnabled } from '../audio/softClipperTuning.js'
 import { CEILING_PRESETS, DEFAULT_CEILING_PRESET, presetById } from '../audio/ceilingPresets.js'
 
+/**
+ * How close the ceiling must be to a setter's value to count as holding it, dB:
+ * one knob detent (0.5) clears it, a float round trip through the worker and
+ * the kernel does not. A tolerance on equality, not a range.
+ */
+export const SETTER_MATCH_DB = 0.05
+
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const SOFT_CLIPPER_WINDOW_ID = 'soft-clipper'
 
@@ -752,6 +759,46 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /**
+     * Why the ceiling setters are greyed out, or null when they are live. A
+     * setter MEASURES THE SELECTED REGION, so the reason is an instruction:
+     * turn the plugin on, select a region, or wait for the measurement.
+     */
+    const ceilingDisabledReason = computed(() => {
+      if (!clipperPreview.value) return 'Turn Soft Clipper on to measure a ceiling'
+      if (!hasSelection.value) return 'Select a region — the preset measures its peaks'
+      if (ceilingBusy.value) return 'Measuring…'
+      return null
+    })
+
+    /**
+     * The line under the CLIP / LIMIT switch: the mode table's own caption, or —
+     * with the tuning knob between the two positions — where the limiter is and
+     * what it costs at the file's rate, rather than lighting a position it is
+     * not at.
+     */
+    const limiterCaption = computed(() => {
+      const mode = LIMITER_MODES.find(m => m.id === limiterMode.value)
+      if (mode) return mode.caption
+      const sr = state.currentFile?.sampleRate ?? 44100
+      return `limiter ${limiter.value} · ${limiterLatencyMs(sr).toFixed(1)} ms`
+    })
+
+    /**
+     * The four ceiling setters, each with the dBFS it would write (null until
+     * the region is measured) and whether the ceiling is holding it now.
+     *
+     * ⚠ THE HIGHLIGHT IS DERIVED, NOT REMEMBERED: the setter's own number
+     * against the live ceiling, so it lights when they agree and goes out when
+     * they do not — a stored "last clicked" flag went stale the moment the knob
+     * or the line moved. A setter with no number is not ready, never optimistic.
+     */
+    const ceilingSetters = computed(() => CEILING_PRESETS.map((p) => {
+      const db = ceilingChoices.value[p.id]
+      const ready = Number.isFinite(db)
+      return { ...p, db: ready ? db : null, ready, active: ready && Math.abs(db - fixedThresholdDb.value) <= SETTER_MATCH_DB }
+    }))
+
     return {
       headroomDb,
       outputTrimDb,
@@ -774,6 +821,9 @@ const copies = pluginCopies((copy, life) => {
       LIMITER_MODES,
       setLimiterMode,
       limiterLatencyMs,
+      limiterCaption,
+      ceilingDisabledReason,
+      ceilingSetters,
       emphasisDb,
       tuningOn,
       clipperPreview,

@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
@@ -12,7 +12,9 @@ import { fetDriveFor } from '../audio/effects/fet1176Params.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { INPUT_TRIM_MAX_DB } from '../audio/dsp/inputAlign.js'
-import { FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB } from '../audio/fet1176Processor.js'
+import {
+  FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB, attackSecondsForDial, releaseSecondsForDial,
+} from '../audio/fet1176Processor.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const FET1176_WINDOW_ID = 'fet-punch'
@@ -663,8 +665,24 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /**
+     * AUTO on: the measurement owns the input alignment again. AUTO off: the
+     * measured value becomes the hand-held starting point rather than jumping.
+     */
+    function setInputAlignAuto(on) {
+      if (on) enableInputAuto()
+      else syncInputAlign(fetInputAlignDb.value)
+    }
+
+    /** The Attack and Release dials as the time constants they set, seconds. */
+    const fetAttackSeconds = computed(() => attackSecondsForDial(fetAttack.value))
+    const fetReleaseSeconds = computed(() => releaseSecondsForDial(fetRelease.value))
+
     return {
       fetInputAlignDb,
+      setInputAlignAuto,
+      fetAttackSeconds,
+      fetReleaseSeconds,
       fetInputAuto,
       syncInputAlign,
       enableInputAuto,

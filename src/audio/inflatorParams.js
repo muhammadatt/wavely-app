@@ -29,3 +29,12 @@ export { CURVE_MIN_PCT, CURVE_MAX_PCT }
 export function inflatorLiftDb(curvePct) {
   return 20 * Math.log10(1.5 + curvePct / 100)
 }
+
+/**
+ * The most lift a setting gives, dB: the small-signal slope blended in linearly
+ * in amplitude by Effect (0–1), 1 + Effect·(f'(0) − 1).
+ */
+export function inflatorMaxLiftDb(curvePct, effect) {
+  const slope = 10 ** (inflatorLiftDb(curvePct) / 20)
+  return 20 * Math.log10(1 + effect * (slope - 1))
+}

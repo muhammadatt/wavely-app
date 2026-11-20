@@ -1,4 +1,5 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { inflatorMaxLiftDb } from '../audio/inflatorParams.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyInflatorRegion, computePeakCache } from '../audio/processing.js'
@@ -205,7 +206,11 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /** The most lift the current settings can give, dB (the ladder shows what is applied now). */
+    const inMaxLiftDb = computed(() => inflatorMaxLiftDb(inCurve.value, inEffect.value))
+
     return {
+      inMaxLiftDb,
       inInputDb,
       inEffect,
       inCurve,

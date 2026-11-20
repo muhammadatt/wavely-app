@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
@@ -9,7 +9,8 @@ import { resonanceEffect as soloResonanceEffect, RESONANCE_DEFAULTS } from '../a
 import { resolveRefMode, withRefModeDefaults } from '../audio/resonanceParams.js'
 import { placeResonanceZones } from '../audio/resonanceZonePlacement.js'
 import { resolveTargeting } from '../audio/resonanceTargeting.js'
-import { DEFAULT_RESONANCE_FOCUS, copyFocus } from '../audio/resonanceFocus.js'
+import { DEFAULT_RESONANCE_FOCUS, copyFocus, RESONANCE_FOCUS_RANGES, focusThresholdFn } from '../audio/resonanceFocus.js'
+import { patchNode, removeNode, setNodeParam } from '../components/meters/resonanceFocusNodes.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const RESONANCE_WINDOW_ID = 'resonance-suppressor'
@@ -574,7 +575,61 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    const focusMode = resTargeting === 'focus'
+
+    /**
+     * The threshold offset the plot draws its dotted line and its crossings
+     * from. Null under zones, so the plot keeps its own zone lookup and the
+     * shipping path is untouched. A `computed`, so the normalisation inside
+     * `focusThresholdFn` happens once per edit rather than once per display
+     * bin per animation frame.
+     */
+    const resSelectivityFn = computed(() => (focusMode ? focusThresholdFn(resFocus.value) : null))
+
+    /**
+     * The global threshold the plot draws its rail from.
+     *
+     * ⚠ GUARDED: `resFocus` is null under the zone model, and reading
+     * `.global` off it took the whole panel down under `?resoTargeting=zones`.
+     * The floor rather than the stock 20 when there is no patch: nothing draws
+     * the rail under zones, so the number only has to be inside the range.
+     */
+    const resFocusThreshold = computed(() =>
+      (focusMode ? resFocus.value.global.selectivity : RESONANCE_FOCUS_RANGES.selectivity.min))
+
+    /** The selected focus node, or null. */
+    const resSelectedFocusNode = computed(() => (focusMode
+      ? resFocus.value.nodes[resSelectedNode.value] ?? null
+      : null))
+
+    /**
+     * Edit the selected focus node. `shape` and `enabled` are not numbers, so
+     * they take `patchNode` rather than the clamping setter `setNodeParam`,
+     * which would silently reject them.
+     */
+    function patchSelectedNode(patch) {
+      const i = resSelectedNode.value
+      let next = resFocus.value.nodes
+      for (const [name, value] of Object.entries(patch)) {
+        next = name === 'shape' || name === 'enabled'
+          ? patchNode(next, i, { [name]: value })
+          : setNodeParam(next, i, name, value)
+      }
+      syncFocus({ ...resFocus.value, nodes: next })
+    }
+
+    /** Remove the selected focus node; nothing is selected after. */
+    function deleteSelectedNode() {
+      syncFocus({ ...resFocus.value, nodes: removeNode(resFocus.value.nodes, resSelectedNode.value) })
+      resSelectedNode.value = -1
+    }
+
     return {
+      resSelectivityFn,
+      resFocusThreshold,
+      resSelectedFocusNode,
+      patchSelectedNode,
+      deleteSelectedNode,
       resAttack,
       resRelease,
       resMix,

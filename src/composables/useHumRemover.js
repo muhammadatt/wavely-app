@@ -85,6 +85,29 @@ const copies = pluginCopies((copy, life) => {
 
     const hasEnabledNotches = computed(() => humHarmonics.value.some(h => h.enabled))
 
+    /**
+     * Where the analysis stands, as structured state; the panel words it.
+     * `kind`: 'analysing' | 'none' (nothing analysed) | 'too-short' | 'stale'
+     * (the audio changed since) | 'pitched' (flagged energy follows a pitched
+     * source in the recording, so nothing is notched) | 'no-hum' | 'active'.
+     * `vetoed` lists the frequencies left out as part of the recording.
+     */
+    const humStatus = computed(() => {
+      if (humAnalyzing.value) return { kind: 'analysing' }
+      const a = humAnalysis.value
+      if (!a) return { kind: 'none' }
+      if (a.tooShort) return { kind: 'too-short' }
+      if (isStale.value) return { kind: 'stale' }
+      const vetoed = a.detectionDetail.filter(d => d.flagged && d.matchesPitchedSource).map(d => d.frequency)
+      const enabled = humHarmonics.value.filter(h => h.enabled).length
+      if (!a.triggered && enabled === 0) {
+        return vetoed.length > 0
+          ? { kind: 'pitched', vetoed, pitchedSourceHz: a.pitchedSourceHz }
+          : { kind: 'no-hum', anchorHz: a.anchorFrequency, anchorDeltaDb: a.anchorDeltaDb }
+      }
+      return { kind: 'active', enabled, vetoed }
+    })
+
     function initChain() {
       const ctx = getAudioContext()
       const chain = getEffectChain(ctx)
@@ -303,6 +326,7 @@ const copies = pluginCopies((copy, life) => {
       humOutputLevels,
       isStale,
       hasEnabledNotches,
+      humStatus,
       hasSelection,
       togglePreview,
       analyze,

@@ -2,7 +2,7 @@
 import { localPoint } from '../../../ui/pointerLocal.js'
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { eqResponseDb } from '../../../audio/eqProcessor.js'
-import { getRole, bandwidthOctaves, ROLES_IN_ORDER, isBandActive } from '../../../audio/eqBands.js'
+import { getRole, bandwidthOctaves, ROLES_IN_ORDER, isBandActive, GAINLESS_TYPES, hasGainTerm } from '../../../audio/eqBands.js'
 
 /**
  * The EQ display, shared by both modes.
@@ -177,8 +177,8 @@ const cursorHz = ref(null)
  * its range is 60 dB and more, and letting it drive the gain scale would
  * compress every band the user is actually adjusting into a few pixels.
  */
-/** Shapes with no gain term, whose curves fall away without limit. */
-const UNBOUNDED_TYPES = new Set(['notch', 'highpass', 'lowpass'])
+/** Shapes with no gain term, whose curves fall away without limit (eqBands.js). */
+const UNBOUNDED_TYPES = GAINLESS_TYPES
 
 /**
  * The narrowest AUTO will go.
@@ -935,7 +935,7 @@ const shownHandles = computed(() => {
 function handleStyle(band) {
   // Same rule as the axis: a shape with no gain term sits on the centre line,
   // not at whatever gain it happened to carry in from its previous type.
-  const hasGain = band.type !== 'notch' && band.type !== 'highpass' && band.type !== 'lowpass'
+  const hasGain = hasGainTerm(band.type)
   return {
     left: `${(xFor(band.frequencyHz) / width.value) * 100}%`,
     top: `${yFor(hasGain ? band.gainDb : 0)}px`,

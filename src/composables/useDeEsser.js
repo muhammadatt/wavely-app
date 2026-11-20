@@ -10,6 +10,7 @@ import { levelOffsetDbFor } from '../audio/deEsserProcessor.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { deEsserEffect as soloDeEsserEffect, DE_ESSER_DEFAULTS } from '../audio/effects/deEsser.js'
 import { splitAmount, amountSplitOf } from '../audio/deEsserParams.js'
+import { softenLaw } from '../audio/deEsserSoftenStage.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -80,6 +81,15 @@ const copies = pluginCopies((copy, life) => {
   const hfInputLevels = ref([])
   const hfOutputLevels = ref([])
   let meterId = null
+
+  /**
+   * Everything the plugin is taking off right now, dB: Duck + EQ, plus Reso
+   * and Soften only while they are in (their meters hold a last value).
+   */
+  const hfTotalReduction = computed(() => hfReduction.value + hfBroadband.value
+    + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
+  /** The deepest cut the Soften knob allows on one attack, dB (0 = off). */
+  const hfSoftenDepthDb = computed(() => softenLaw(hfSoften.value).depthDb)
 
   function currentParams() {
     return {
@@ -554,6 +564,7 @@ const copies = pluginCopies((copy, life) => {
       hfDelta,
       hfPreview,
       hfReduction,
+      hfTotalReduction, hfSoftenDepthDb,
       hfReso,
       hfAirLamp,
       getScope,

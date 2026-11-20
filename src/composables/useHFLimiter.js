@@ -8,10 +8,25 @@ import {
 } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { shelfResponseDb } from '../audio/dsp/hfLimit.js'
+import {
+  FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
+  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TRANSIENT_MAX_DB,
+} from '../audio/hfLimiterParams.js'
+import { HF_LIMITER_OUTPUT_MIN_DB, HF_LIMITER_OUTPUT_MAX_DB } from '../audio/pluginPresets/hfLimiter.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { hfLimiterEffect as soloHfLimiterEffect, HF_LIMITER_DEFAULTS } from '../audio/effects/hfLimiter.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+
+/** Each typed / dragged param's travel and step — the knobs' own. */
+export const HF_LIMITER_TRAVEL = {
+  threshold: { lo: THRESHOLD_MIN_DB, hi: THRESHOLD_MAX_DB, step: 0.5 },
+  freq: { lo: FREQ_MIN_HZ, hi: FREQ_MAX_HZ, step: 10 },
+  range: { lo: 0, hi: RANGE_MAX_DB, step: 0.5 },
+  transient: { lo: 0, hi: TRANSIENT_MAX_DB, step: 0.5 },
+  release: { lo: RELEASE_MIN_MS, hi: RELEASE_MAX_MS, step: 1 },
+  output: { lo: HF_LIMITER_OUTPUT_MIN_DB, hi: HF_LIMITER_OUTPUT_MAX_DB, step: 0.1 },
+}
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const HF_LIMITER_WINDOW_ID = 'hf-limiter'
@@ -142,6 +157,18 @@ const copies = pluginCopies((copy, life) => {
       pushParam(name, value)
     }
 
+    /**
+     * Set a param from a typed value or a drag: snapped to its control's step
+     * and clamped to its travel (an LCD or the curve's node has no range of its
+     * own). Unchanged values are not re-sent.
+     */
+    function setParamWithin(name, value) {
+      const t = HF_LIMITER_TRAVEL[name]
+      if (!t || !Number.isFinite(value)) return
+      const v = Math.max(t.lo, Math.min(t.hi, Math.round(value / t.step) * t.step))
+      if (v !== hflParams[name]) syncParam(name, v)
+    }
+
     /** A preset's controls, through the same path a knob turn takes. */
     function applyParams(p) {
       for (const [k, v] of Object.entries(p)) {
@@ -241,6 +268,7 @@ const copies = pluginCopies((copy, life) => {
 
     return {
       responseDb,
+      setParamWithin,
       hflParams,
       hflPreview,
       hflDelta,

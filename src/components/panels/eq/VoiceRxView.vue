@@ -342,10 +342,7 @@ function onCreateBand({ frequencyHz, gainDb, adopt }) {
  * that exists only here.
  */
 function onQBand({ id, delta }) {
-  const band = props.eq.findBand(id)
-  if (!band) return
-  // Multiplicative, so the step feels the same at Q 0.5 and Q 8.
-  props.eq.setQ(id, band.q * (delta > 0 ? 1.15 : 1 / 1.15))
+  props.eq.nudgeBandQ(id, delta)
 }
 
 /** Touching a dot focuses its role, so the strip follows the plot. */

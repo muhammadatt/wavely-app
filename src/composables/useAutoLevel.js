@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { useEntitlements } from './useEntitlements.js'
@@ -58,6 +58,31 @@ export function skipReasonText(reason) {
   }
 }
 
+/**
+ * The last run as figures, for the panel's LAST RUN card: null before any run;
+ * else `declined` (the reason's text, or null when it levelled) and, when it
+ * levelled, phrases, the phrase-loudness spread before / after, the deepest cut
+ * and the largest boost (both dB ≥ 0), and `cap` when the room-tone floor
+ * limited the boosts — `{ boostDb }`, 0 when it allowed none.
+ */
+export const lastRunSummary = computed(() => {
+  const r = lastResult.value
+  if (!r) return null
+  const m = r.measurements
+  if (!m) return { declined: skipReasonText(r.reason) }
+  return {
+    declined: r.reason ? skipReasonText(r.reason) : null,
+    phrases: m.clip_count_after_merge,
+    spreadBeforeDb: m.input_clip_lufs_std_db,
+    spreadAfterDb: m.output_clip_lufs_std_db,
+    // gain_max_down_db is the solve's signed MINIMUM gain (−3.2 for a 3.2 dB
+    // cut, 0 when nothing was cut), so the cut is its magnitude.
+    cutDb: Math.max(0, -m.gain_max_down_db),
+    boostDb: Math.max(0, m.gain_max_up_db),
+    cap: m.noise_floor_cap_active ? { boostDb: m.max_up_effective_db <= 0.01 ? 0 : m.max_up_effective_db } : null,
+  }
+})
+
 export function useAutoLevel() {
   const {
     state, hasSelection, replaceRegion, setPeakCache,
@@ -66,7 +91,9 @@ export function useAutoLevel() {
   const entitlements = useEntitlements()
   const { openWindow, closeWindow } = useWindows()
 
+  /** Set one param. Refused while a run is in flight: the run reads them. */
   function syncParam(name, value) {
+    if (processing.value) return
     params.value = { ...params.value, [name]: value }
   }
 
@@ -154,7 +181,7 @@ export function useAutoLevel() {
   }
 
   return {
-    params, processing, lastResult, hasSelection,
+    params, processing, lastResult, lastRunSummary, hasSelection,
     syncParam, resetParams, apply,
     openModal: () => openWindow(AUTOLEVEL_WINDOW_ID),
     closeModal: () => closeWindow(AUTOLEVEL_WINDOW_ID),

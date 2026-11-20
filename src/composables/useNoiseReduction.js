@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useEntitlements } from './useEntitlements.js'
 import { useWindows } from './useWindows.js'
@@ -87,7 +87,16 @@ export function useNoiseReduction() {
   const entitlements = useEntitlements()
   const { openWindow, closeWindow } = useWindows()
 
+  /** Which passes the mode runs: Clean (DF3) and Deep Clean (RNNoise). */
+  const cleanOn = computed(() => usesDf3(params.engine))
+  const deepOn = computed(() => usesRnnoise(params.engine))
+
+  // Every setter refuses while a run is in flight (the run read the settings
+  // it was sent with, and Mix is blended at commit), and a pass's own setting
+  // refuses while the mode leaves that pass out — its card is dimmed.
+
   function setEngine(engine) {
+    if (processing.value) return
     params.engine = engine
   }
 
@@ -97,20 +106,28 @@ export function useNoiseReduction() {
    * on from that state brings back only that pass.
    */
   function setPass(pass, on) {
+    if (processing.value) return
     const deep = pass === 'df3' ? on : usesDf3(params.engine)
     const light = pass === 'rnnoise' ? on : usesRnnoise(params.engine)
     params.engine = engineFor(deep, light)
   }
 
   function setDf3Limit(v) {
+    if (processing.value || !cleanOn.value) return
     params.df3LimitDb = v
   }
 
   function setProtectConsonants(on) {
+    if (processing.value || !deepOn.value) return
     params.protectConsonants = on
   }
 
+  function toggleProtectConsonants() {
+    setProtectConsonants(!params.protectConsonants)
+  }
+
   function setMix(v) {
+    if (processing.value) return
     params.mix = v
   }
 
@@ -262,10 +279,13 @@ export function useNoiseReduction() {
     params,
     processing,
     hasSelection,
+    cleanOn,
+    deepOn,
     setEngine,
     setPass,
     setDf3Limit,
     setProtectConsonants,
+    toggleProtectConsonants,
     setMix,
     resetParams,
     apply,

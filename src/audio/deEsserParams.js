@@ -100,6 +100,10 @@ export function amountSplitOf(duck, amount) {
   return { total: Math.min(100, sum), split: sum > 0 ? Math.round((100 * (Number(amount) || 0)) / sum) : null }
 }
 
+/** The panel's Amount and Split at the shipping Duck / EQ — what a double-click resets them to. */
+export const DE_ESSER_AMOUNT_DEFAULT = amountSplitOf(DE_ESSER_DEFAULTS.duck, DE_ESSER_DEFAULTS.amount).total
+export const DE_ESSER_SPLIT_DEFAULT = amountSplitOf(DE_ESSER_DEFAULTS.duck, DE_ESSER_DEFAULTS.amount).split
+
 /** Map UI param names to kernel param names. */
 export function toKernelParams(params) {
   return {

@@ -1,17 +1,13 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, useSlots } from 'vue'
-import { useWindows, CHAIN_WINDOW_ID } from '../../composables/useWindows.js'
+import { useWindows } from '../../composables/useWindows.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import {
-  chainWindowMounted, chainWindowUnmounted, chainStatusFor, chainApplying,
-} from '../../composables/usePluginChain.js'
-import { currentPluginCopy, idForCopy, chainCopyNumber, isChainCopyId } from '../../composables/pluginCopies.js'
+import { useWindowFrame } from '../../composables/useWindowFrame.js'
+import { currentPluginCopy, idForCopy, chainCopyNumber } from '../../composables/pluginCopies.js'
 import { helpFor, helpUrl } from '../../content/help/index.js'
 import { resolveHarnessChrome } from '../../ui/harnessChrome.js'
 import { isSheetViewport, sheetGeometry, SHEET_MAX_WIDTH as SHEET_NARROW_PX } from '../../ui/windowSheet.js'
 import Icon from '../ui/Icon.vue'
-import { useEntitlements } from '../../composables/useEntitlements.js'
-import { isOffline } from '../../auth/plans.js'
 import ModulaPresetBrowser from '../modula/ModulaPresetBrowser.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
 
@@ -337,28 +333,15 @@ const hasFooter = computed(() => props.showApply || props.showPreview)
 // A selection is what Apply acts on. Without one the footer offers to make one
 // rather than printing a notice about its absence — "select all" is a button,
 // "make a selection to apply" is a complaint.
-// Nothing applies over a file that is already being processed: two renders of
-// the same selection would each commit, the later one overwriting the earlier
-// (a solo plugin opened while the chain was applying could do exactly that).
-const busy = computed(() => !!state.isProcessing)
-const applyBlocked = computed(() => !!inChain.value || busy.value || props.applyDisabled || (props.requiresSelection && !hasSelection.value))
-const entitlements = useEntitlements()
-const applyLocked = computed(() => !!props.applyFeature && !entitlements.can(props.applyFeature))
+// What the frame DECIDES — the Apply gate, the window's place in the chain,
+// what opening and closing does — is useWindowFrame's; this component draws it.
+const {
+  inChain, frozen, applyBlocked, applyLocked, applyTitle, requestApply,
+} = useWindowFrame({ windowId, props: () => props, hasFooter })
 
 function onApplyClick() {
-  if (props.applyFeature && !entitlements.request(props.applyFeature)) return
-  emit('apply')
+  requestApply(() => emit('apply'))
 }
-
-const applyTitle = computed(() => {
-  if (inChain.value) return 'This plugin is in the Effect Chain — apply it from the chain'
-  if (busy.value) return 'This file is still being processed — wait for it to finish'
-  if (props.applyDisabled) return props.applyDisabledHint
-  if (props.requiresSelection && !hasSelection.value) return 'Select audio to apply this effect to'
-  // An offline process has no preview to offer, so it does not promise one.
-  if (applyLocked.value) return entitlements.hint(props.applyFeature) + (isOffline(props.applyFeature) ? '' : ' — preview is free')
-  return ''
-})
 
 const EMPTY_TIME = '—'
 function formatTime(seconds) {
@@ -487,20 +470,6 @@ function updateOverflow() {
 // Whatever had focus when this opened, so closing can hand it back.
 let previouslyFocused = null
 
-// ── Chain membership ────────────────────────────────────────────────────────
-// A plugin with a slot in the Plugin Chain says so (a chain badge with its slot
-// number by the name, which opens the rack) and has NO APPLY of its own: the chain's Apply is the one that
-// writes it, in order with the rest. Joining happens only from the chain's
-// Add picker, so a plugin outside the chain shows nothing here.
-const inChain = computed(() => {
-  const status = chainStatusFor(windowId)
-  return status?.member ? status : null
-})
-
-// While the chain applies, the chain and its copies' windows take no input: a
-// knob turned or a slot removed mid-render would change what is being rendered.
-const frozen = computed(() => chainApplying.value && (windowId === CHAIN_WINDOW_ID || isChainCopyId(windowId)))
-
 // What goes between lead and tail: nothing when the two are one word in two
 // weights, else a space. The visible mark and the accessible name share it.
 const brandSep = computed(() => (props.brandTail && !props.brandJoined ? ' ' : ''))
@@ -545,14 +514,6 @@ onMounted(() => {
     for (const el of [headerEl.value, headLeftEl.value, headRightEl.value]) if (el) headRo.observe(el)
   }
   balanceHeader()
-
-  // A plugin keeps playing in the chain while its window is closed, with its
-  // meters stopped; reopening the window brings them back.
-  chainWindowMounted(windowId)
-
-  // A plugin that can preview or apply opens on the whole file when nothing is
-  // selected, so Preview works at once. An existing selection is left alone.
-  if (hasFooter.value && !hasSelection.value) selectAll()
 
   // A window that was resized before is reopened at the size it was left, the
   // same courtesy the position gets. Restored before the position fallback
@@ -604,8 +565,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  // However the window closed — ×, Escape, or replaced by another plugin.
-  chainWindowUnmounted(windowId)
   window.removeEventListener('resize', onViewportResize)
   bodyRo?.disconnect()
   headRo?.disconnect()

@@ -28,7 +28,6 @@
  */
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useHFLimiter } from '../../composables/useHFLimiter.js'
-import { useEditorState } from '../../composables/useEditorState.js'
 import {
   HF_LIMITER_DEFAULTS, FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
   RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TRANSIENT_MAX_DB,
@@ -53,7 +52,7 @@ const {
   responseDb,
   hflParams, hflPreview, hflDelta, hflReduction, hflTransient,
   hflInputLevels, hflOutputLevels,
-  togglePreview, syncParam, toggleDelta, apply, teardown, closeModal,
+  togglePreview, syncParam, setParamWithin, toggleDelta, apply, teardown, closeModal,
 } = pluginApi
 
 const presets = usePluginPresets(HF_LIMITER_PRESET_PLUGIN, hfLimiterSettings(pluginApi))
@@ -131,10 +130,8 @@ function onCurveDown(e) {
   const freq0 = hflParams.freq, range0 = hflParams.range
   const set = ev => {
     const octaves = ((ev.clientX - x0) / rect.width) * Math.log2(F_MAX / F_MIN)
-    const freq = Math.round(clampTo(freq0 * Math.pow(2, octaves), FREQ_MIN_HZ, FREQ_MAX_HZ) / 10) * 10
-    const range = Math.round(clampTo(range0 + ((ev.clientY - y0) / rect.height) * RANGE_MAX_DB, 0, RANGE_MAX_DB) * 2) / 2
-    if (freq !== hflParams.freq) syncParam('freq', freq)
-    if (range !== hflParams.range) syncParam('range', range)
+    setParamWithin('freq', freq0 * Math.pow(2, octaves))
+    setParamWithin('range', range0 + ((ev.clientY - y0) / rect.height) * RANGE_MAX_DB)
   }
   const up = () => {
     window.removeEventListener('pointermove', set)
@@ -162,7 +159,6 @@ function gridLabel(f) {
   return f >= 1000 ? `${f / 1000}k` : String(f)
 }
 
-const clampTo = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
 const fmtFreq = v => (v >= 10000 ? `${(v / 1000).toFixed(1)}k Hz` : `${(v / 1000).toFixed(2)}k Hz`)
 const fmtDb = v => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`
 const fmtRange = v => (v <= 0 ? 'OFF' : `−${v.toFixed(1)} dB`)
@@ -177,10 +173,6 @@ function parseHz(t) {
 /** Range and Transient are cuts: "-6", "6" and "−6" all mean 6 dB. */
 const parseCut = t => Math.abs(parseFloat(t))
 
-/** A typed value, clamped to the knob's travel (the LCD has no range of its own). */
-function typed(key, lo, hi, step) {
-  return v => syncParam(key, clampTo(Math.round(v / step) * step, lo, hi))
-}
 
 const SHAPE_OPTIONS = [
   { value: 'tight', label: 'TIGHT', title: 'A one-octave, linear-phase split: a ceiling on the band above Freq, leaving everything below it alone' },
@@ -232,7 +224,7 @@ const SHAPE_OPTIONS = [
           />
           <HFLimiterLcd
             :text="fmtDb(hflParams.threshold)" aria-label="Threshold" :disabled="!hflPreview"
-            @commit="typed('threshold', THRESHOLD_MIN_DB, THRESHOLD_MAX_DB, 0.5)($event)"
+            @commit="setParamWithin('threshold', $event)"
           />
           <div class="hl-shape" data-help="shape">
             <span class="hl-cap">Shape</span>
@@ -303,7 +295,7 @@ const SHAPE_OPTIONS = [
             <span class="hl-cap">Freq</span>
             <HFLimiterLcd
               :text="fmtFreq(hflParams.freq)" :edit-text="String(hflParams.freq)" :parse="parseHz" aria-label="Freq" :disabled="!hflPreview"
-              @commit="typed('freq', FREQ_MIN_HZ, FREQ_MAX_HZ, 10)($event)"
+              @commit="setParamWithin('freq', $event)"
             />
           </div>
           <div class="hl-ctl" data-help="range">
@@ -317,7 +309,7 @@ const SHAPE_OPTIONS = [
             <span class="hl-cap">Range</span>
             <HFLimiterLcd
               :text="fmtRange(hflParams.range)" :parse="parseCut" aria-label="Range" :disabled="!hflPreview"
-              @commit="typed('range', 0, RANGE_MAX_DB, 0.5)($event)"
+              @commit="setParamWithin('range', $event)"
             />
           </div>
         </div>
@@ -347,7 +339,7 @@ const SHAPE_OPTIONS = [
             </span>
             <HFLimiterLcd
               :text="fmtTransient(hflParams.transient)" :parse="parseCut" aria-label="Transient" :disabled="!hflPreview"
-              @commit="typed('transient', 0, TRANSIENT_MAX_DB, 0.5)($event)"
+              @commit="setParamWithin('transient', $event)"
             />
           </div>
         </div>
@@ -363,7 +355,7 @@ const SHAPE_OPTIONS = [
             <span class="hl-cap hl-cap--mono">Release</span>
             <HFLimiterLcd
               :text="fmtMs(hflParams.release)" aria-label="Release" :disabled="!hflPreview"
-              @commit="typed('release', RELEASE_MIN_MS, RELEASE_MAX_MS, 1)($event)"
+              @commit="setParamWithin('release', $event)"
             />
           </div>
         </div>
@@ -379,7 +371,7 @@ const SHAPE_OPTIONS = [
             <span class="hl-cap hl-cap--mono">Output</span>
             <HFLimiterLcd
               :text="fmtDb(hflParams.output)" aria-label="Output" :disabled="!hflPreview"
-              @commit="typed('output', HF_LIMITER_OUTPUT_MIN_DB, HF_LIMITER_OUTPUT_MAX_DB, 0.1)($event)"
+              @commit="setParamWithin('output', $event)"
             />
           </div>
         </div>

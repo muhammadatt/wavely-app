@@ -12,7 +12,6 @@
  */
 import { computed } from 'vue'
 import { useHumRemover } from '../../composables/useHumRemover.js'
-import { useEditorState } from '../../composables/useEditorState.js'
 import { HUM_NOTCH_DEFAULTS } from '../../audio/effects/humNotch.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaButton from '../modula/ModulaButton.vue'
@@ -25,7 +24,7 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const {
   humFundamental, humQ, humDepth, humHarmonics, humAnalysis, humAnalyzing,
-  humPreview, humInputLevels, humOutputLevels, isStale, hasEnabledNotches, hasSelection,
+  humPreview, humInputLevels, humOutputLevels, isStale, hasEnabledNotches, humStatus, hasSelection,
   togglePreview, analyze, toggleHarmonic, setFundamental, syncQ, syncDepth,
   apply, teardown, closeModal,
 } = useHumRemover()
@@ -49,28 +48,21 @@ const MAINS_OPTIONS = [
   { value: 50, label: '50 Hz', title: 'Europe, UK, Australia, Asia' },
 ]
 
-const enabledCount = computed(() => humHarmonics.value.filter(h => h.enabled).length)
-
 const statusLine = computed(() => {
-  if (humAnalyzing.value) return 'Analysing…'
-  if (!humAnalysis.value) return 'Analyse the selection to find mains hum.'
-  if (humAnalysis.value.tooShort) {
-    return 'Selection too short — analyse at least one second.'
-  }
-  if (isStale.value) return 'Audio changed since analysis — analyse again.'
-  const a = humAnalysis.value
-  const vetoed = a.detectionDetail.filter(d => d.flagged && d.matchesPitchedSource)
-  if (!a.triggered && enabledCount.value === 0) {
-    if (vetoed.length > 0) {
-      const list = vetoed.map(d => `${d.frequency} Hz`).join(', ')
-      return `Energy at ${list} follows a ${a.pitchedSourceHz} Hz source in the recording, not mains hum.`
+  const st = humStatus.value
+  switch (st.kind) {
+    case 'analysing': return 'Analysing…'
+    case 'none': return 'Analyse the selection to find mains hum.'
+    case 'too-short': return 'Selection too short — analyse at least one second.'
+    case 'stale': return 'Audio changed since analysis — analyse again.'
+    case 'pitched':
+      return `Energy at ${st.vetoed.map(f => `${f} Hz`).join(', ')} follows a ${st.pitchedSourceHz} Hz source in the recording, not mains hum.`
+    case 'no-hum': return `No hum found. Anchor ${st.anchorHz} Hz was ${st.anchorDeltaDb} dB above the floor.`
+    default: {
+      const suffix = st.vetoed.length > 0 ? ` ${st.vetoed.length} left out as part of the recording.` : ''
+      return `${st.enabled} notch${st.enabled === 1 ? '' : 'es'} active.${suffix}`
     }
-    return `No hum found. Anchor ${a.anchorFrequency} Hz was ${a.anchorDeltaDb} dB above the floor.`
   }
-  const suffix = vetoed.length > 0
-    ? ` ${vetoed.length} left out as part of the recording.`
-    : ''
-  return `${enabledCount.value} notch${enabledCount.value === 1 ? '' : 'es'} active.${suffix}`
 })
 
 function formatQ(v) {

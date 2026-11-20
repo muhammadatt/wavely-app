@@ -34,6 +34,10 @@ const PLOT = readFileSync(
   new URL('../../src/components/meters/ResonanceSpectrum.vue', import.meta.url), 'utf8')
 const PANEL = readFileSync(
   new URL('../../src/components/panels/ResonanceModal.vue', import.meta.url), 'utf8')
+// The threshold function is decided in the composable (panels draw; composables
+// decide) and handed to the panel as `resSelectivityFn`.
+const COMPOSABLE = readFileSync(
+  new URL('../../src/composables/useResonance.js', import.meta.url), 'utf8')
 
 test('the plot accepts a threshold offset instead of only reading zones', () => {
   assert.match(PLOT, /selectivityFn:\s*\{\s*type:\s*Function/,
@@ -62,16 +66,17 @@ test('the panel hands the plot a threshold under focus and nothing under zones',
   // literal backspace through the layers between the source and disk; the
   // replacement after that put a real newline inside a string literal. Two
   // failures in a row from escaping, on an assertion that is a substring search.
-  const at = PANEL.indexOf("from '../../audio/resonanceFocus.js'")
-  assert.ok(at > 0, 'the panel must import from resonanceFocus.js')
+  const at = COMPOSABLE.indexOf("from '../audio/resonanceFocus.js'")
+  assert.ok(at > 0, 'the composable must import from resonanceFocus.js')
   assert.ok(
-    PANEL.slice(Math.max(0, at - 200), at).includes('focusThresholdFn'),
-    'the panel must import focusThresholdFn',
+    COMPOSABLE.slice(Math.max(0, at - 200), at).includes('focusThresholdFn'),
+    'the composable must import focusThresholdFn',
   )
   // Built from the live patch, so it is rebuilt when a knob moves...
-  assert.match(PANEL, /focusMode \? focusThresholdFn\(resFocus\.value\) : null/)
+  assert.match(COMPOSABLE, /focusMode \? focusThresholdFn\(resFocus\.value\) : null/)
   // ...in a computed, so it is NOT rebuilt per display bin per animation frame.
-  assert.match(PANEL, /const selectivityFn = computed\(/)
+  assert.match(COMPOSABLE, /const resSelectivityFn = computed\(/)
+  assert.match(PANEL, /resSelectivityFn: selectivityFn/)
   // And actually reaches the plot. This is the assertion that would have caught
   // the reported bug; every other test in this suite passed while it was live.
   assert.match(PANEL, /:selectivity-fn="selectivityFn"/)

@@ -1,9 +1,8 @@
 <script setup>
 import { computed } from 'vue'
 import { useFET1176 } from '../../composables/useFET1176.js'
-import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  attackSecondsForDial, releaseSecondsForDial, FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB,
+  FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB,
 } from '../../audio/fet1176Processor.js'
 import { FET1176_DEFAULTS } from '../../audio/effects/fet1176Params.js'
 import HardwareKnob from '../hardware/HardwareKnob.vue'
@@ -29,7 +28,7 @@ const pluginApi = useFET1176()
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetAnalog, fetScHpf, fetMix,
   fetAutoMakeup, fetPreview, fetReduction,
-  fetInputAlignDb, fetInputAuto, syncInputAlign, enableInputAuto,
+  fetInputAlignDb, fetInputAuto, syncInputAlign, setInputAlignAuto, fetAttackSeconds, fetReleaseSeconds,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
   syncDrive, syncAnalog, syncScHpf, syncMix, toggleAutoMakeup, 
   apply, teardown, closeModal, refreshKernelTuning,
@@ -107,8 +106,8 @@ const formatDial = (v) => `Dial ${Math.round(v)}`
 
 const inputReadout = computed(() => formatInteger(fetInput.value))
 const outputReadout = computed(() => formatSignedDb(fetOutput.value))
-const attackReadout = computed(() => formatMs(attackSecondsForDial(fetAttack.value)))
-const releaseReadout = computed(() => formatMs(releaseSecondsForDial(fetRelease.value)))
+const attackReadout = computed(() => formatMs(fetAttackSeconds.value))
+const releaseReadout = computed(() => formatMs(fetReleaseSeconds.value))
 const mixReadout = computed(() => formatPercent(fetMix.value))
 
 /**
@@ -122,12 +121,8 @@ const mixReadout = computed(() => formatPercent(fetMix.value))
  * nearly every file, so the face shows only a readout and the override sits
  * behind it (FoldedLcd). Stepping it takes over from AUTO, exactly as Output
  * behaves under Auto Makeup; turning AUTO off keeps the measured value as the
- * starting point rather than jumping.
+ * starting point rather than jumping (`setInputAlignAuto`).
  */
-function setAlignAuto(on) {
-  if (on) enableInputAuto()
-  else syncInputAlign(fetInputAlignDb.value)
-}
 
 /**
  * The lamp beside the nameplate is HARMONICS, not power: power is the header's
@@ -266,7 +261,7 @@ const toggleHarmonics = () => syncAnalog(!fetAnalog.value)
             :model-value="fetInputAlignDb"
             @update:model-value="syncInputAlign"
             :auto="fetInputAuto"
-            @update:auto="setAlignAuto"
+            @update:auto="setInputAlignAuto"
             :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
             :disabled="off"
           />

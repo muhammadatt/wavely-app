@@ -1,7 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useResonance } from '../../composables/useResonance.js'
-import { RESONANCE_FOCUS_RANGES, focusThresholdFn } from '../../audio/resonanceFocus.js'
 import {
   RESONANCE_DEFAULTS,
   DEFAULT_REF_MODE,
@@ -18,12 +17,7 @@ import {
   toggleOverlay as flipOverlay,
 } from '../../ui/resonanceOverlays.js'
 import { HISTORY_SECONDS } from '../meters/resonanceHistory.js'
-import {
-  focusRanks,
-  patchNode,
-  removeNode,
-  setNodeParam,
-} from '../meters/resonanceFocusNodes.js'
+import { focusRanks } from '../meters/resonanceFocusNodes.js'
 import FocusNodePanel from './FocusNodePanel.vue'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaChip from '../modula/ModulaChip.vue'
@@ -47,6 +41,9 @@ const {
   resDisplayFn, hasSelection,
   resVoiceProfile, resPlacementBusy, fitZonesToVoice,
   resTargeting, resFocus, resSelectedNode, resSoloNode, syncFocus, toggleFocusSolo,
+  // Node edits and the plot's threshold: useResonance's.
+  resSelectivityFn: selectivityFn, resFocusThreshold: focusThreshold,
+  resSelectedFocusNode: selectedNode, patchSelectedNode: patchFocusNode, deleteSelectedNode: deleteFocusNode,
   togglePreview, toggleDelta, syncAttack,
   syncRelease, syncMix, syncTrim, syncZones, toggleZoneDelta, clearZoneDelta,
   resMode, syncMode,
@@ -86,32 +83,6 @@ const ACCENT = '#8fd48a'
 const SECOND = '#e8a33d'
 
 /**
- * The threshold offset the plot draws its dotted line and its crossings from.
- *
- * Null under zones, so the plot keeps its own zone lookup and the shipping path
- * is untouched. A `computed`, so the normalisation inside `focusThresholdFn`
- * happens once per edit rather than once per display bin per animation frame.
- */
-const selectivityFn = computed(() =>
-  (focusMode ? focusThresholdFn(resFocus.value) : null))
-
-/**
- * The global threshold the plot draws its rail from.
- *
- * ⚠ GUARDED, AND IT WAS NOT. `resFocus` is null under the zone model, so
- * reading `.global` off it threw on the panel's FIRST RENDER and took the whole
- * of ResoTame down under `?resoTargeting=zones` — the neighbouring `focusNodes`
- * binding had the guard, this one did not. Found by opening the panel, which is
- * the only way: componentBindings.test.js cannot catch it, because the name IS
- * declared and it is the VALUE that is null.
- *
- * The floor rather than the stock 20 when there is no patch: nothing draws the
- * rail under zones, so the number only has to be inside the prop's range.
- */
-const focusThreshold = computed(() =>
-  (focusMode ? resFocus.value.global.selectivity : RESONANCE_FOCUS_RANGES.selectivity.min))
-
-/**
  * The spectrum display's height — opens at 140, and grows from there. See
  * FloatingWindow's `resizable`: the corner grip reports how many extra
  * pixels the user has dragged in, and this is the only thing here that
@@ -145,35 +116,6 @@ const plotHeight = computed(() => PLOT_H + heightDelta.value)
  */
 const nodePanelOpen = ref(true)
 watch(() => resSelectedNode.value, () => { nodePanelOpen.value = true })
-
-/** The selected focus node, or null — what the fields are shown for. */
-const selectedNode = computed(() => (focusMode
-  ? resFocus.value.nodes[resSelectedNode.value] ?? null
-  : null))
-
-/**
- * Node edits, applied here rather than in the plot.
- *
- * They lived in ResonanceSpectrum because the panel did, back when it floated
- * beside its node. `shape` and
- * `enabled` are not numbers, so they take `patchNode` rather than the clamping
- * setter `setNodeParam`, which would silently reject them.
- */
-function patchFocusNode(patch) {
-  const i = resSelectedNode.value
-  let next = resFocus.value.nodes
-  for (const [name, value] of Object.entries(patch)) {
-    next = name === 'shape' || name === 'enabled'
-      ? patchNode(next, i, { [name]: value })
-      : setNodeParam(next, i, name, value)
-  }
-  syncFocus({ ...resFocus.value, nodes: next })
-}
-
-function deleteFocusNode() {
-  syncFocus({ ...resFocus.value, nodes: removeNode(resFocus.value.nodes, resSelectedNode.value) })
-  resSelectedNode.value = -1
-}
 
 /**
  * ⚠ THE PLOT KEEPS ITS OWN READINGS NOW, so nothing here holds them. AVE and

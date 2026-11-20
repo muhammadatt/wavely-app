@@ -38,8 +38,6 @@ import {
   NR_DF3_LIMIT_MIN_DB,
   NR_DF3_LIMIT_MAX_DB,
   NR_PASS_LABELS,
-  usesDf3,
-  usesRnnoise,
 } from '../../audio/noiseReductionParams.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaButton from '../modula/ModulaButton.vue'
@@ -51,8 +49,8 @@ import { usePluginWindow } from '../../composables/usePluginWindow.js'
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  params, processing,
-  setEngine, setDf3Limit, setProtectConsonants, setMix,
+  params, processing, cleanOn, deepOn,
+  setEngine, setDf3Limit, toggleProtectConsonants, setMix,
   apply, cancel, closeModal,
 } = useNoiseReduction()
 
@@ -83,8 +81,6 @@ const TIERS = [
   { label: 'MAX', value: NR_DF3_LIMIT_MAX_DB },
 ]
 
-const cleanOn = computed(() => usesDf3(params.engine))
-const deepOn = computed(() => usesRnnoise(params.engine))
 const anyOn = computed(() => cleanOn.value || deepOn.value)
 
 function formatLimit(v) {
@@ -95,20 +91,14 @@ function parseLimit(t) {
   return /max/i.test(t) ? NR_DF3_LIMIT_MAX_DB : parseFloat(t)
 }
 
-function pickTier(v) {
-  if (cleanOn.value && !processing.value) setDf3Limit(v)
-}
-
-function toggleGuard() {
-  if (deepOn.value && !processing.value) setProtectConsonants(!params.protectConsonants)
-}
+// The setters refuse while running and while their pass is out (useNoiseReduction).
+const pickTier = setDf3Limit
+const toggleGuard = toggleProtectConsonants
 
 const modeStop = computed(() => radioTabStop(MODES, m => m.value === params.engine))
 const tierStop = computed(() => radioTabStop(TIERS, t => t.value === Math.round(params.df3LimitDb)))
 
-function pickMode(m) {
-  if (!processing.value) setEngine(m.value)
-}
+const pickMode = m => setEngine(m.value)
 
 // Apply-then-close (offline: the window stays open unless the run committed).
 const { applyAndClose } = usePluginWindow({ apply, closeModal, closeOnlyOnSuccess: true })

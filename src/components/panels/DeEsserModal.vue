@@ -26,13 +26,12 @@
  */
 import { computed } from 'vue'
 import { useDeEsser } from '../../composables/useDeEsser.js'
-import { useEditorState } from '../../composables/useEditorState.js'
 import {
   AIR_MAKEUP_MAX_DB,
   DETECT_HZ_MIN, DETECT_HZ_MAX, DETECT_HI_MIN, DETECT_HI_MAX, DETECT_MIN_RATIO,
 } from '../../audio/deEsserProcessor.js'
-import { guardToFloorDb, amountSplitOf, DE_ESSER_DEFAULTS } from '../../audio/deEsserParams.js'
-import { softenLaw, SOFTEN_MAX } from '../../audio/deEsserSoftenStage.js'
+import { DE_ESSER_DEFAULTS, DE_ESSER_AMOUNT_DEFAULT as AMOUNT_DEFAULT, DE_ESSER_SPLIT_DEFAULT as SPLIT_DEFAULT } from '../../audio/deEsserParams.js'
+import { SOFTEN_MAX } from '../../audio/deEsserSoftenStage.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
@@ -50,11 +49,11 @@ defineProps({ z: { type: Number, default: 500 } })
 
 const pluginApi = useDeEsser()
 const {
-  hfAmount, hfSplit, hfTotal, hfGuard, hfBand, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfAirLossDb, hfComp, hfDetect, hfDetectHigh, hfAudition, hfDuck, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfSplit, hfTotal, hfGuard, hfBand, hfSoften, hfSoftenCut, hfAir, hfAirLossDb, hfComp, hfDetect, hfDetectHigh, hfAudition, hfDuck, hfBroadband, hfDelta, hfPreview,
   hfLevelOffset, refreshLevel,
-  hfReduction, hfOutputLevels,
+  hfReduction, hfOutputLevels, hfTotalReduction, hfSoftenDepthDb,
   togglePreview, syncSoften, syncAir, syncComp, syncDetect, syncDetectHigh, scheduleAutoAir, syncTotal, syncSplit, syncGuard, applyParams, toggleDelta, toggleAudition,
-  hfReso, hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
+  hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
   apply, teardown, closeModal,
 } = pluginApi
 
@@ -98,8 +97,6 @@ const envelope = useTimelineEnvelope()
 // each stage actually got, as a note under the knob.
 const stageNote = computed(() => `WIDE ${Math.round(hfDuck.value)} · SPLIT ${Math.round(hfAmount.value)}`)
 const formatSplit = v => (v <= 0 ? 'ALL WIDE' : v >= 100 ? 'ALL SPLIT' : `${100 - Math.round(v)} / ${Math.round(v)}`)
-const AMOUNT_DEFAULT = amountSplitOf(D.duck, D.amount).total
-const SPLIT_DEFAULT = amountSplitOf(D.duck, D.amount).split
 
 // ── Detector strip ──────────────────────────────────────────────────────────
 // The strip's axis starts at 500 Hz, not 100: the two handles live between
@@ -113,8 +110,6 @@ const F_MIN = 500
 const F_MAX = 20000
 const GRID_FREQS = [1000, 2000, 3000, 4000, 6000, 8000, 12000, 16000]
 
-const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
-
 /**
  * THE READOUT IS HELD, NOT LIVE. Read raw, each figure changed every frame —
  * an "s" is 30–40 ms, so a number was on screen for one or two frames before
@@ -123,7 +118,7 @@ const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (h
  * what is printed is "the most it took just now" and stays long enough to read.
  */
 const shown = useHeldReadings({
-  total: () => totalReduction.value,
+  total: () => hfTotalReduction.value,
   duck: () => hfBroadband.value,
   eq: () => hfReduction.value,
   soft: () => hfSoftenCut.value,
@@ -141,7 +136,7 @@ const airCaption = computed(() => (hfComp.value
   : 'manual'))
 // What the Soften knob currently allows on one attack.
 const softenCaption = computed(() => {
-  const d = softenLaw(hfSoften.value).depthDb
+  const d = hfSoftenDepthDb.value
   return d > 0 ? `onsets · up to −${Math.round(d)} dB` : 'off'
 })
 
@@ -160,10 +155,6 @@ function formatPct(v) {
 function formatGuard(v) {
   return v > 0 ? `${Math.round(v)}%` : 'OFF'
 }
-
-const guardLabel = computed(() =>
-  hfGuard.value > 0 ? `floor ${guardToFloorDb(hfGuard.value).toFixed(0)} dB` : 'no guard',
-)
 </script>
 
 <template>
