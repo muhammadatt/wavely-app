@@ -767,13 +767,34 @@ try {
       if (!menuOpened) why.push('long press did not open the menu; ')
       await pp.keyboard.press('Escape')
 
-      // A category tab opens its list as a sheet; tapping it again closes it.
+      // A category tab opens its effect list as a sheet: the v1 effects first,
+      // the rest behind More; a window opened from it takes the screen and
+      // closes the list; tapping the tab again closes it.
+      const sheet = pp.locator('[data-testid=mobile-effect-sheet]')
       await pp.locator('[data-testid=mobile-tab-dynamics]').click()
       await pp.waitForTimeout(500)
-      if (!(await pp.locator('.ctx-panel.is-sheet').count())) why.push('a category tab did not open its sheet; ')
+      if (!(await sheet.count())) why.push('a category tab did not open its sheet; ')
+      if (!(await pp.locator('[data-testid=mobile-effect-opto-smooth]').count())) why.push('the sheet does not list LA Vintage 2A; ')
+      if (await pp.locator('[data-testid=mobile-effect-fet-punch]').count()) why.push('a non-v1 plugin shows before More is opened; ')
+      await pp.locator('[data-testid=mobile-effect-more]').click()
+      if (!(await pp.locator('[data-testid=mobile-effect-fet-punch]').count())) why.push('More did not show the rest; ')
       await pp.locator('[data-testid=mobile-tab-dynamics]').click()
       await pp.waitForTimeout(500)
-      if (await pp.locator('.ctx-panel').count()) why.push('tapping the tab again did not close the sheet; ')
+      if (await sheet.count()) why.push('tapping the tab again did not close the sheet; ')
+
+      await pp.locator('[data-testid=mobile-tab-level]').click()
+      await pp.waitForTimeout(400)
+      // A rail view opens inside the sheet, with a way back.
+      await pp.locator('[data-testid=mobile-effect-fade]').click()
+      await pp.waitForTimeout(300)
+      if (!(await pp.locator('[data-testid=mobile-effect-back]').count())) why.push('Fade did not open inside the sheet; ')
+      await pp.locator('[data-testid=mobile-effect-back]').click()
+      await pp.locator('[data-testid=mobile-effect-normalize]').click()
+      await pp.waitForTimeout(800)
+      const win = await pp.evaluate(() => !!document.querySelector('.win-frame.is-sheet'))
+      if (!win) why.push('Peak Normalize did not open as a window sheet; ')
+      if (await sheet.count()) why.push('the list stayed open under the window; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
 
       // The Plugin Chain opens as a sheet with Apply on screen.
       await pp.locator('[data-testid=mobile-tab-chain]').click()

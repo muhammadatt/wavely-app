@@ -8,7 +8,7 @@ import MobileTabBar from './MobileTabBar.vue'
 import WaveformOverview from '../WaveformOverview.vue'
 import WaveformArea from '../WaveformArea.vue'
 import WaveformScrollbar from '../WaveformScrollbar.vue'
-import ContextPanel from '../ContextPanel.vue'
+import MobileEffectSheet from './MobileEffectSheet.vue'
 import EmptyState from '../EmptyState.vue'
 import ProcessingOverlay from '../ProcessingOverlay.vue'
 
@@ -55,7 +55,7 @@ const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspac
       <EmptyState v-else class="flex-1 min-h-0" />
 
       <Transition name="m-sheet">
-        <ContextPanel v-if="state.activeTool" sheet />
+        <MobileEffectSheet v-if="state.activeTool" />
       </Transition>
     </div>
 

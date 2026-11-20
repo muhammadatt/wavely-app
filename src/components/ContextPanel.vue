@@ -17,10 +17,6 @@ import Icon from './ui/Icon.vue'
  * Categories carrying a bespoke `panel` (Master) render it directly and
  * skip the list level; they aren't lists of operations.
  */
-// `sheet`: always a bottom sheet (the mobile shell), not only on a narrow
-// window as in the desktop shell.
-defineProps({ sheet: { type: Boolean, default: false } })
-
 const { state, closeRail, setRailOperation } = useEditorState()
 const { dispatch, isDisabled } = useOperationDispatch()
 
@@ -33,10 +29,9 @@ const operation = computed(() => (state.railOperation ? getOperation(state.railO
        waveform ~100 px, so the rail becomes a bottom sheet over the lower half
        of the editor instead; the waveform above it stays visible and usable. -->
   <div
-    class="ctx-panel relative overflow-y-auto"
-    :class="sheet
-      ? 'is-sheet absolute inset-x-0 bottom-0 z-[60] max-h-[60%] border-t border-border-1 rounded-t-[16px]'
-      : 'w-[280px] shrink-0 border-l border-border-1 max-sm:absolute max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-[60] max-sm:w-auto max-sm:max-h-[55%] max-sm:border-l-0 max-sm:border-t max-sm:rounded-t-[16px]'"
+    class="ctx-panel w-[280px] shrink-0 relative border-l border-border-1 overflow-y-auto
+           max-sm:absolute max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-[60] max-sm:w-auto max-sm:max-h-[55%]
+           max-sm:border-l-0 max-sm:border-t max-sm:rounded-t-[16px]"
     style="background:linear-gradient(180deg,#141922,#0e1116)"
   >
     <button

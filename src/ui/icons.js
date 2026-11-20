@@ -135,6 +135,8 @@ export const ICONS = {
   offline: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
+  chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
+  chevronUp: '<polyline points="18 15 12 9 6 15"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
   close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
   // Head and shoulders: the account button's stand-in for "Sign in" on a phone.
