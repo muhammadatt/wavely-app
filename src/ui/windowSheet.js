@@ -1,11 +1,12 @@
 /**
- * Plugin windows on a phone: a full-screen sheet, scaled to fit.
+ * Plugin windows on a phone: a bottom sheet, scaled to fit.
  *
  * Plugin faceplates are laid out by hand at one width (560–868 px) and a
  * floating window that size on a 390–430 px tall phone is cut off and cannot
  * be dragged back. Redesigning twenty panels for a narrow screen is not on the
  * table, so on a small viewport the window instead becomes a SHEET: pinned to
- * the whole screen, not draggable or resizable, and — when the screen is
+ * the bottom edge at the full width, as tall as the panel up to the whole
+ * screen (FloatingWindow's CSS), not draggable or resizable, and — when the screen is
  * narrower than the faceplate — the whole frame scaled down with CSS `zoom`
  * until the faceplate fits the width. Zoom (unlike a transform) scales layout,
  * so the body still scrolls the right distance and hit-testing still lands.
