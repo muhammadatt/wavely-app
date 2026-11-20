@@ -559,7 +559,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -577,9 +577,13 @@ const copies = pluginCopies((copy, life) => {
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('PHATaSS applied')
+        return true
       } catch (err) {
         console.error('PHATaSS failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'PHATaSS failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !phPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }

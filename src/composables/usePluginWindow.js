@@ -32,10 +32,15 @@ export function shouldEngageOnOpen(engaged, copy) {
  * The window's close and apply actions over the plugin's own `apply`,
  * `teardown` and `closeModal`.
  *
- * `closeOnlyOnSuccess` is the OFFLINE plugins' rule (Auto Leveler, Noise
- * Reduction): their apply resolves true when it committed, and a refused or
- * cancelled run leaves the window open. The live plugins close whatever apply
- * resolved, after stopping their preview and meters (`teardown`).
+ * A window stays open when nothing was committed, so a refused or failed
+ * apply (no selection, the plan, a tab switch mid-render, an error) leaves the
+ * user where they were. The live plugins' apply resolves `false` for that and
+ * `true` on a commit; anything else is read as a commit, so an apply that does
+ * not report keeps closing as it always did. Closing stops the preview and
+ * meters first (`teardown`).
+ *
+ * `closeOnlyOnSuccess` is the OFFLINE plugins' stricter rule (Auto Leveler,
+ * Noise Reduction): only an apply that resolved truthy closes the window.
  */
 export function pluginWindowActions({ apply, teardown, closeModal, closeOnlyOnSuccess = false }) {
   function close() {
@@ -47,6 +52,7 @@ export function pluginWindowActions({ apply, teardown, closeModal, closeOnlyOnSu
       if (committed) closeModal()
       return committed
     }
+    if (committed === false) return false
     teardown?.()
     closeModal()
     return committed

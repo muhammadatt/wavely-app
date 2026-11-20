@@ -52,11 +52,12 @@ export const loudnessSettingsIO = {
  * Loudness Normalize: measure the region against a delivery target, then move
  * it there and hold a peak ceiling.
  *
- * ⚠ CALL IT FROM THE WINDOW'S SETUP. Its state, its measurement and the
- * watchers that re-run it live as long as the window that asked for them — as
- * they did when they sat in the panel. Nothing here is live audio, and a
- * measurement re-running on every selection change with the window shut would
- * be pure cost (it is uncapped by design; see `remeasure`).
+ * ⚠ CALL IT FROM THE WINDOW'S SETUP. Its measurement, the watchers that
+ * re-run it and the Applied report live as long as the window that asked for
+ * them. Nothing here is live audio, and a measurement re-running on every
+ * selection change with the window shut would be pure cost (it is uncapped by
+ * design; see `remeasure`). The SETTINGS are the exception: they are module
+ * state, kept per file (see above), so they outlive the window.
  */
 export function useLoudnessNormalize() {
   const { state, appState, totalDuration, showToast } = useEditorState()
@@ -208,7 +209,13 @@ export function useLoudnessNormalize() {
   watch(() => state.revision, scheduleMeasure)
   // Another file: its own reading, at once. Neither watch above fires when both
   // files have no selection and the same revision count.
+  //
+  // ⚠ THE SEQUENCE IS BUMPED FIRST, so a pass still measuring the file just
+  // left is thrown away when it lands. Without it that pass carried the
+  // current sequence number (remeasure only queues a re-run while one is in
+  // flight) and its reading became the new file's until the re-run replaced it.
   watch(() => appState.activeDocumentId, () => {
+    measureSeq++
     measurement.value = null
     clearTimeout(measureTimer)
     remeasure()

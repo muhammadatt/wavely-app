@@ -346,15 +346,15 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection || !envelopeValid.value) return
-      if (!entitlements.request('sibilanceEditor')) return
+      if (!state.selection || !envelopeValid.value) return false
+      if (!entitlements.request('sibilanceEditor')) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
       const pin = pinActiveDocument('Sibilance Editor')
 
       const envelope = rebuildEnvelope()
-      if (!envelope) return
+      if (!envelope) return false
 
       const wasPreviewing = preview.value
       if (wasPreviewing) togglePreview()
@@ -369,9 +369,13 @@ const copies = pluginCopies((copy, life) => {
         showToast(`De-essed ${treatedCount.value} event${treatedCount.value === 1 ? '' : 's'}`)
         // The audio just changed, so the measurements no longer describe it.
         clearAnalysis()
+        return true
       } catch (err) {
         console.error('De-esser apply failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'De-esser apply failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !preview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }

@@ -278,7 +278,7 @@ export function createEqInstance({
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -296,9 +296,13 @@ export function createEqInstance({
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast(`${label} applied`)
+        return true
       } catch (err) {
         console.error(`${label} failed:`, err)
         showToast(err instanceof DocumentSwitchedError ? err.message : `${label} failed`)
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !eqPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }

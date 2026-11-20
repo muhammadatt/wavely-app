@@ -32,6 +32,47 @@ test('a live plugin applies, stops its preview and meters, then closes', async (
   assert.deepEqual(r.calls, ['apply', 'teardown', 'close'])
 })
 
+test('a live plugin whose apply committed nothing keeps its window, preview and meters', async () => {
+  const committed = recorder(true)
+  await pluginWindowActions(committed).applyAndClose()
+  assert.deepEqual(committed.calls, ['apply', 'teardown', 'close'])
+
+  const failed = recorder(false)
+  const out = await pluginWindowActions(failed).applyAndClose()
+  assert.deepEqual(failed.calls, ['apply'], 'a refused or failed apply leaves the user where they were')
+  assert.equal(out, false)
+})
+
+test('every live plugin\'s apply reports whether it committed', async () => {
+  // usePluginWindow keeps the window open only on `false`, so each live apply
+  // must resolve true from its commit and false from its catch.
+  const { readFileSync, readdirSync } = await import('node:fs')
+  const panels = new URL('../../src/components/panels/', import.meta.url)
+  const files = readdirSync(panels, { recursive: true }).filter(f => f.endsWith('.vue'))
+  const composables = new Set()
+  for (const f of files) {
+    const src = readFileSync(new URL(f, panels), 'utf8')
+    if (!/usePluginWindow\(/.test(src) || /closeOnlyOnSuccess/.test(src)) continue
+    for (const m of src.matchAll(/from '[./]+\/composables\/(use\w+)\.js'/g)) composables.add(m[1])
+  }
+  // The EQ and VoiceRx windows reach their apply through useManualEq /
+  // useVoiceRx, which both build it in useEqInstance.
+  composables.add('useEqInstance')
+  const problems = []
+  let checked = 0
+  for (const name of composables) {
+    const src = readFileSync(new URL(`../../src/composables/${name}.js`, import.meta.url), 'utf8')
+    const at = src.search(/async function apply\(\) \{/)
+    if (at < 0) continue // a helper composable (the window, presets, the editor)
+    checked++
+    const body = src.slice(at, src.indexOf('\n    }\n', at))
+    if (!/return true\n\s*\} catch \(err\) \{/.test(body)) problems.push(`${name}: no \`return true\` at the end of its try`)
+    if (!/return false\n\s*\} finally \{/.test(body)) problems.push(`${name}: its catch does not \`return false\``)
+  }
+  assert.ok(checked >= 17, `checked ${checked} applies`)
+  assert.deepEqual(problems, [])
+})
+
 test('closing a live plugin window stops its preview and meters', () => {
   const r = recorder()
   pluginWindowActions(r).close()

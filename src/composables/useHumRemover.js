@@ -262,7 +262,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -281,9 +281,13 @@ const copies = pluginCopies((copy, life) => {
         showToast('Hum removed')
         // The audio just changed, so the measurement no longer describes it.
         clearAnalysis()
+        return true
       } catch (err) {
         console.error('Hum removal failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'Hum removal failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !humPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }

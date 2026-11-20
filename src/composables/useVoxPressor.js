@@ -687,8 +687,8 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
-      if (!useEntitlements().request('voxPressor')) return
+      if (!state.selection) return false
+      if (!useEntitlements().request('voxPressor')) return false
       const { start, end } = state.selection
       const pin = pinActiveDocument('VoxPressor')
       const wasPreviewing = voxPreview.value
@@ -701,9 +701,13 @@ const copies = pluginCopies((copy, life) => {
         const bufferId = replaceRegion(start, end, buffer, 'VoxPressor', pin.docId, pin.selection)
         setPeakCache(bufferId, await computePeakCache(buffer, 256))
         showToast('VoxPressor applied')
+        return true
       } catch (err) {
         console.error('VoxPressor failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'VoxPressor failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !voxPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }

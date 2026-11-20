@@ -564,7 +564,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -610,9 +610,13 @@ const copies = pluginCopies((copy, life) => {
         showToast(Math.abs(trimDb) >= 0.05
           ? `LA Classic 76 applied — peak restored ${trimDb >= 0 ? '+' : ''}${trimDb.toFixed(2)} dB`
           : 'LA Classic 76 compression applied')
+        return true
       } catch (err) {
         console.error('FET Punch failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'LA Classic 76 compression failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !fetPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
