@@ -828,6 +828,16 @@ try {
       await pp.locator('[data-testid=mobile-file-switcher]').click()
       await pp.waitForTimeout(300)
       if ((await fileRows.nth(0).getAttribute('aria-current')) !== 'true') why.push('tapping a row did not switch to it; ')
+      // Escape in the rename field cancels the rename only: the selection on
+      // the waveform and the switcher both stay.
+      await pp.evaluate(async () => (await import('/src/composables/useEditorState.js')).useEditorState().selectAll())
+      await fileSheet.locator('.m-file-more').nth(1).click()
+      await pp.locator('[data-testid=mobile-file-rename]').click()
+      await pp.locator('[data-testid=mobile-file-rename-input]').press('Escape')
+      await pp.waitForTimeout(150)
+      const afterEsc = await pp.evaluate(async () => !!(await import('/src/composables/useEditorState.js')).useEditorState().state.selection)
+      if (!afterEsc) why.push('Escape in the rename field cleared the selection; ')
+      if (!(await fileSheet.count())) why.push('Escape in the rename field closed the switcher; ')
       await fileSheet.locator('.m-file-more').nth(1).click()
       await pp.locator('[data-testid=mobile-file-rename]').click()
       await pp.locator('[data-testid=mobile-file-rename-input]').fill('Second take.wav')
@@ -838,6 +848,24 @@ try {
       await pp.locator('[data-testid=mobile-file-close]').click()
       await pp.waitForTimeout(300)
       if ((await fileRows.count()) !== 1) why.push('Close did not close the file; ')
+      // Above a short plugin window the file name is still tappable, and the
+      // switcher it opens is on top of the window, not behind it; Escape
+      // closes the switcher first.
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(350)
+      if (await fileSheet.count()) why.push('Escape did not close the switcher; ')
+      await pp.evaluate(async () => (await import('/src/composables/useWindows.js')).useWindows().openWindow('normalize'))
+      await pp.waitForTimeout(600)
+      await pp.locator('[data-testid=mobile-file-switcher]').click()
+      await pp.waitForTimeout(400)
+      const onTop = await pp.evaluate(() => {
+        const r = document.querySelector('[data-testid=mobile-file-open]')?.getBoundingClientRect()
+        if (!r) return false
+        return !!document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('[data-testid=mobile-file-sheet]')
+      })
+      if (!onTop) why.push('the switcher opened behind a plugin window; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(350)
+      if (await fileSheet.count()) why.push('Escape did not close the switcher over a window; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
       // A category tab takes over from the switcher.
       await pp.locator('[data-testid=mobile-tab-edit]').click()
       await pp.waitForTimeout(400)

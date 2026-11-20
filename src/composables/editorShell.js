@@ -14,6 +14,7 @@ import { useFileImport } from './useFileImport.js'
 import { useFileSave } from './useFileSave.js'
 import { useWindows } from './useWindows.js'
 import { installPerFilePluginSettings } from './perFilePluginSettings.js'
+import { useMobileSheets } from './useMobileSheets.js'
 import { requestTogglePlayback } from '../ui/transportBus.js'
 
 export function installEditorShell() {
@@ -29,6 +30,7 @@ export function installEditorShell() {
   const { promptForFiles } = useFileImport()
   const { saveDocument, saveDocumentAs } = useFileSave()
   const { closeTopWindow, anyWindowOpen } = useWindows()
+  const { fileSheetOpen, closeFileSheet } = useMobileSheets()
 
   const NUDGE_SECONDS = 1
   const NUDGE_SECONDS_COARSE = 5
@@ -44,6 +46,8 @@ export function installEditorShell() {
   function closeTopModal() {
     if (appState.contextMenu) { closeContextMenu(); return true }
     if (appState.commandPaletteOpen) { closeCommandPalette(); return true }
+    // The phone's file switcher sits above the plugin windows.
+    if (fileSheetOpen.value) { closeFileSheet(); return true }
     if (closeTopWindow()) return true
     if (appState.saveDialog) { appState.saveDialog = null; return true }
     if (appState.filesPanelOpen) { appState.filesPanelOpen = false; return true }

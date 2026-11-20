@@ -4,6 +4,8 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { useWindows } from '../../composables/useWindows.js'
 import { usePluginChain } from '../../composables/usePluginChain.js'
 import { CATEGORIES } from '../../ui/registry.js'
+import { useMobileSheets } from '../../composables/useMobileSheets.js'
+import { MOBILE_EXCLUDED_CATEGORIES } from '../../ui/mobileEffects.js'
 import Icon from '../ui/Icon.vue'
 
 /**
@@ -15,16 +17,15 @@ const { state, setActiveTool, closeRail, hasFile } = useEditorState()
 const { openWindow, isOpen } = useWindows()
 const { slots, liveSlots, bypassed, suspended } = usePluginChain()
 
-// Mastering presets are deferred (the Master category is dev-only on desktop
-// too) and not part of mobile v1, so the tabs never show it, dev builds
-// included: seven tabs do not fit a phone's width.
-const MOBILE_EXCLUDED = new Set(['master'])
-const tabs = CATEGORIES.filter(c => !MOBILE_EXCLUDED.has(c.id))
+const { closeFileSheet } = useMobileSheets()
+
+const tabs = CATEGORIES.filter(c => !MOBILE_EXCLUDED_CATEGORIES.has(c.id))
 
 const chainActive = computed(() => liveSlots.value.length > 0 && !bypassed.value && !suspended.value)
 
 function openChain() {
   closeRail()
+  closeFileSheet()
   openWindow('plugin-chain')
 }
 </script>

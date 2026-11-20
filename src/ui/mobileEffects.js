@@ -25,6 +25,13 @@ export const MOBILE_V1_OPERATION_IDS = Object.freeze([
 
 const V1 = new Set(MOBILE_V1_OPERATION_IDS)
 
+/**
+ * Categories the phone shell has no tab for. Mastering presets are deferred
+ * (Master is dev-only on desktop too) and not part of mobile v1, dev builds
+ * included: seven tabs do not fit a phone's width.
+ */
+export const MOBILE_EXCLUDED_CATEGORIES = new Set(['master'])
+
 export function isMobileV1(op) {
   return !!op && V1.has(op.id)
 }

@@ -153,7 +153,7 @@ function exportSeveral() {
               class="m-rename-input"
               :aria-label="`New name for ${row.doc.name}`"
               data-testid="mobile-file-rename-input"
-              @keydown.esc.prevent="cancelRename"
+              @keydown.esc.prevent.stop="cancelRename"
             />
             <button type="submit" class="m-rename-done" data-testid="mobile-file-rename-done">Done</button>
           </form>
@@ -200,7 +200,11 @@ function exportSeveral() {
 .m-files {
   position: absolute;
   inset: auto 0 0 0;
-  z-index: 61;
+  /* Above the plugin windows (WindowLayer: 500 + n): a window's sheet is only
+     as tall as its panel, so the file name stays tappable above a short one,
+     and the switcher it opens must not slide up behind that window. Under
+     the account screen (600) and the dialogs. */
+  z-index: 560;
   max-height: 78%;
   display: flex;
   flex-direction: column;

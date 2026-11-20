@@ -12,6 +12,7 @@ import WaveformScrollbar from '../WaveformScrollbar.vue'
 import MobileEffectSheet from './MobileEffectSheet.vue'
 import MobileFileSheet from './MobileFileSheet.vue'
 import { useMobileSheets } from '../../composables/useMobileSheets.js'
+import { MOBILE_EXCLUDED_CATEGORIES } from '../../ui/mobileEffects.js'
 import EmptyState from '../EmptyState.vue'
 import ProcessingOverlay from '../ProcessingOverlay.vue'
 
@@ -27,10 +28,15 @@ import ProcessingOverlay from '../ProcessingOverlay.vue'
  * Chosen at startup on a phone (ui/formFactor.js); "Use desktop layout" in the
  * ⋯ menu switches back.
  */
-const { state, hasFile, hasSelection, hasClipboard } = useEditorState()
+const { state, hasFile, hasSelection, hasClipboard, closeRail } = useEditorState()
 const { fileSheetOpen, closeFileSheet } = useMobileSheets()
-// One sheet at a time: a category opening closes the file switcher.
-watch(() => state.activeTool, tool => { if (tool) closeFileSheet() })
+// One sheet at a time: a category opening closes the file switcher. A
+// category this shell has no tab for (Master, open in the desktop layout
+// when the user switched) is closed rather than shown as an empty sheet.
+watch(() => state.activeTool, tool => {
+  if (MOBILE_EXCLUDED_CATEGORIES.has(tool)) { closeRail(); return }
+  if (tool) closeFileSheet()
+}, { immediate: true })
 installEditorShell()
 const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspaceDrop()
 </script>

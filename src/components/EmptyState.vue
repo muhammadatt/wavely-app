@@ -6,7 +6,8 @@ import { useSessionAutosave } from '../composables/useSessionAutosave.js'
 import BaseButton from './ui/BaseButton.vue'
 import { useEditorState } from '../composables/useEditorState.js'
 
-// Drag-drop is handled once at the workspace level in EditorScreen so files can
+// Drag-drop is handled once at the workspace level (useWorkspaceDrop in
+// composables/editorShell.js, used by both shells) so files can
 // be dropped at any time, not only from here. This component is just the
 // click-to-browse affordance and the import progress readout.
 const { promptForFiles, importFiles, isImporting, importProgress } = useFileImport()
