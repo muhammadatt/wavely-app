@@ -657,6 +657,9 @@ export function useVoiceRx(copy) {
   return copies(copy)()
 }
 
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useVoiceRx.builtCopies = () => copies.built()
+
 export function openVoiceRxWindow() {
   useWindows().openWindow(VOICERX_WINDOW_ID)
 }

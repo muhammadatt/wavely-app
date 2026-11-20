@@ -71,6 +71,9 @@ async function waitForServer(ms = 40000) {
 
 const wav = join(tmpdir(), 'wavely-panel-smoke.wav')
 writeProbeWav(wav)
+// A second file, for the per-file chain step.
+const wav2 = join(tmpdir(), 'second-take.wav')
+writeProbeWav(wav2)
 
 let server = null
 if (!(await waitForServer(1000))) {
@@ -304,6 +307,70 @@ try {
       repeatsOk ? '' : `repeat slots misnumbered (${twice} / ${afterRemove} / ${readded}); `,
     ].join('')
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Plugin chain'.padEnd(16)} ${why}${fresh.join(' | ')}`)
+  }
+
+  /**
+   * Each file keeps its own Plugin Chain (perFilePluginSettings.js; owner,
+   * November 2026). A second file opened with nothing saved INHERITS the rack;
+   * rebuilt there, it must not change the first file's, and each comes back on
+   * its own tab — including after the second file is closed. Needs live audio
+   * nodes, which is why it is here and not in the node suite.
+   */
+  {
+    const before = errors.length
+    const openOp = async (name) => {
+      await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
+      await page.keyboard.type(name); await page.waitForTimeout(450)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(1500)
+    }
+    const chainWin = page.locator('.win-frame').filter({ hasText: 'EFFECT CHAIN' })
+    const rack = async () => { await openOp('Effect Chain'); return chainWin.locator('.pc-name').allInnerTexts() }
+    const toTab = async (prefix) => {
+      await page.locator(`[role="tab"][title^="${prefix}"]`).first().click(); await page.waitForTimeout(1200)
+    }
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+    const addSlot = async (label) => {
+      await chainWin.getByRole('button', { name: 'Add effect', exact: true }).dispatchEvent('click'); await page.waitForTimeout(300)
+      await page.keyboard.type(label); await page.waitForTimeout(250)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
+    }
+    // The first file's rack: Inflator, then Air Boost — whatever the step
+    // before left in it is cleared first.
+    for (const name of await rack()) {
+      await chainWin.getByRole('button', { name: new RegExp(`^Remove ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) }).first().dispatchEvent('click')
+      await page.waitForTimeout(300)
+    }
+    await rack()
+    await addSlot('Inflator')
+    await addSlot('Air Boost')
+    const rackA = await rack()
+    // Close the slot windows: the file picker button sits under them.
+    for (let i = 0; i < 4; i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(200) }
+    const chooser = page.waitForEvent('filechooser')
+    await page.getByRole('button', { name: 'Add audio files' }).click()
+    await (await chooser).setFiles(wav2)
+    await page.waitForTimeout(3500)
+    const inherited = await rack()
+
+    // Rebuild the second file's rack: the first slot out.
+    await chainWin.getByRole('button', { name: /^Remove .* from the chain$/ }).first().dispatchEvent('click')
+    await page.waitForTimeout(400)
+    const rackB = await rack()
+
+    await toTab('wavely-panel-smoke'); const backA = await rack()
+    await toTab('second-take'); const backB = await rack()
+    await page.locator('[aria-label^="Close second-take"]').first().dispatchEvent('click'); await page.waitForTimeout(1500)
+    const afterClose = await rack()
+    // Leave no window over the rail for the steps after this one.
+    for (let i = 0; i < 4; i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(200) }
+
+    const fresh = errors.slice(before)
+    const ok = rackA.length === 2 && same(inherited, rackA) && same(rackB, rackA.slice(1))
+      && same(backA, rackA) && same(backB, rackB) && same(afterClose, rackA) && fresh.length === 0
+    if (!ok) failures++
+    const why = ok ? '' : `racks A ${JSON.stringify(rackA)} · B inherited ${JSON.stringify(inherited)} · B rebuilt ${JSON.stringify(rackB)} · back on A ${JSON.stringify(backA)} · back on B ${JSON.stringify(backB)} · after closing B ${JSON.stringify(afterClose)}; `
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Per-file chain'.padEnd(16)} ${why}${fresh.join(' | ')}`)
   }
 
   /**

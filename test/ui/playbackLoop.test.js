@@ -17,6 +17,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { startPlayback, stopPlayback, setPlaybackLoop, setPlaybackRegion } from '../../src/audio/playback.js'
+import { getEffectChain } from '../../src/audio/effectChain.js'
 
 // ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -37,12 +38,16 @@ function makeFakeContext() {
       const node = {
         buffer: null,
         onended: null,
-        connect() {},
+        connectedTo: null,
+        connect(dest) { node.connectedTo = dest },
         disconnect() { disconnected.push(node) },
         start(at, offset, duration) { started.push({ at, offset, duration, node }) },
         stop(at) { stopped.push({ at: at ?? ctx.currentTime, node }) },
       }
       return node
+    },
+    createGain() {
+      return { kind: 'gain', connect() {}, disconnect() {} }
     },
   }
   return { ctx, started, stopped, disconnected }
@@ -338,5 +343,25 @@ test('an edge dragged in and back out again plays the region continuously', () =
   assert.equal(tail.at, cut.at, 'the tail picks up at exactly that instant')
   assert.equal(tail.offset, 6, 'reading into the buffer where the cut landed')
   assert.equal(tail.duration, 2, 'and running to the restored end')
+  stopPlayback()
+})
+
+// ── Routing ─────────────────────────────────────────────────────────────────
+
+/**
+ * A plugin opened while audio plays must hear that audio. Sources used to go
+ * straight to the destination when no chain existed yet, and a started node
+ * keeps its connection — so the first plugin opened mid-playback (the thing
+ * that created the chain) heard nothing until the transport was restarted.
+ */
+test('a source started before any plugin is open is routed into the effect chain', () => {
+  const { ctx, started } = makeFakeContext()
+  startPlayback(makeSegments(), 0, ctx, () => {}, () => {})
+  const chain = getEffectChain(ctx)
+  assert.ok(started.length > 0)
+  for (const { node } of started) {
+    assert.equal(node.connectedTo, chain.getInputNode())
+    assert.notEqual(node.connectedTo, ctx.destination)
+  }
   stopPlayback()
 })

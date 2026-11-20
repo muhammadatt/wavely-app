@@ -103,7 +103,15 @@ const copies = pluginCopies((copy, life) => {
       api.adoptBands((p.bands ?? []).map(b => ({ ...b, origin: 'manual_general' })))
     }
 
-    return { ...api, showAnalyzer, dbRange, seedGeneralBands, resetBands, presetParams, applyPreset }
+    /**
+     * A band made on the plot (a click on empty space): a peaking bell at Q 1
+     * where the pointer is. Returns the band, or null at the band limit.
+     */
+    function addBandAt({ frequencyHz, gainDb }) {
+      return api.addBand({ frequencyHz, gainDb, q: 1, type: 'peaking', origin: 'manual_general' })
+    }
+
+    return { ...api, showAnalyzer, dbRange, seedGeneralBands, resetBands, presetParams, applyPreset, addBandAt }
   }
 
   return useManualEq
@@ -113,6 +121,9 @@ const copies = pluginCopies((copy, life) => {
 export function useManualEq(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useManualEq.builtCopies = () => copies.built()
 
 /**
  * Take a set of bands from elsewhere and open the window on them.

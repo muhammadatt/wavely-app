@@ -1,10 +1,8 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useFET1176 } from '../../composables/useFET1176.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
-import { useEditorState } from '../../composables/useEditorState.js'
 import {
-  attackSecondsForDial, releaseSecondsForDial, FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB,
+  FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB,
 } from '../../audio/fet1176Processor.js'
 import { FET1176_DEFAULTS } from '../../audio/effects/fet1176Params.js'
 import HardwareKnob from '../hardware/HardwareKnob.vue'
@@ -22,6 +20,7 @@ import PresetMenu from './PresetMenu.vue'
 import { fet1176Settings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { FET_PUNCH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -29,7 +28,7 @@ const pluginApi = useFET1176()
 const {
   fetInput, fetOutput, fetAttack, fetRelease, fetRatio, fetDrive, fetAnalog, fetScHpf, fetMix,
   fetAutoMakeup, fetPreview, fetReduction,
-  fetInputAlignDb, fetInputAuto, syncInputAlign, enableInputAuto,
+  fetInputAlignDb, fetInputAuto, syncInputAlign, setInputAlignAuto, fetAttackSeconds, fetReleaseSeconds,
   togglePreview, syncInput, syncOutput, syncAttack, syncRelease, syncRatio,
   syncDrive, syncAnalog, syncScHpf, syncMix, toggleAutoMakeup, 
   apply, teardown, closeModal, refreshKernelTuning,
@@ -44,13 +43,14 @@ const showTuningBench = isFET1176TuningVisible()
  */
 const presets = usePluginPresets(FET_PUNCH_PRESET_PLUGIN, fet1176Settings(pluginApi))
 
-const { state } = useEditorState()
-
-// Default to engaged when the panel opens
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!fetPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: fetPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 // The window chrome keeps the app's steel blue for FET Punch; the faceplate
@@ -106,8 +106,8 @@ const formatDial = (v) => `Dial ${Math.round(v)}`
 
 const inputReadout = computed(() => formatInteger(fetInput.value))
 const outputReadout = computed(() => formatSignedDb(fetOutput.value))
-const attackReadout = computed(() => formatMs(attackSecondsForDial(fetAttack.value)))
-const releaseReadout = computed(() => formatMs(releaseSecondsForDial(fetRelease.value)))
+const attackReadout = computed(() => formatMs(fetAttackSeconds.value))
+const releaseReadout = computed(() => formatMs(fetReleaseSeconds.value))
 const mixReadout = computed(() => formatPercent(fetMix.value))
 
 /**
@@ -121,12 +121,8 @@ const mixReadout = computed(() => formatPercent(fetMix.value))
  * nearly every file, so the face shows only a readout and the override sits
  * behind it (FoldedLcd). Stepping it takes over from AUTO, exactly as Output
  * behaves under Auto Makeup; turning AUTO off keeps the measured value as the
- * starting point rather than jumping.
+ * starting point rather than jumping (`setInputAlignAuto`).
  */
-function setAlignAuto(on) {
-  if (on) enableInputAuto()
-  else syncInputAlign(fetInputAlignDb.value)
-}
 
 /**
  * The lamp beside the nameplate is HARMONICS, not power: power is the header's
@@ -135,26 +131,6 @@ function setAlignAuto(on) {
  * reduction are identical), so it is "whether", not "how much".
  */
 const toggleHarmonics = () => syncAnalog(!fetAnalog.value)
-
-// Preview is just transport playback: the worklet is already in the chain, so
-// what makes this effect "live" is that the audio is running while you turn the
-// knobs. Reuses the existing toggle-play bus rather than a second play path.
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-// The shell removes itself from the window manager; this only has to stop the
-// preview chain and the meter loop.
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  // apply() already disables the preview, but the meter loop is still running.
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -170,7 +146,7 @@ async function applyAndClose() {
     :engaged="fetPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!fetPreview"
     apply-disabled-hint="Turn LA Classic 76 on to apply it"
@@ -285,7 +261,7 @@ async function applyAndClose() {
             :model-value="fetInputAlignDb"
             @update:model-value="syncInputAlign"
             :auto="fetInputAuto"
-            @update:auto="setAlignAuto"
+            @update:auto="setInputAlignAuto"
             :min="-INPUT_TRIM_MAX_DB" :max="INPUT_TRIM_MAX_DB" :step="0.5"
             :disabled="off"
           />

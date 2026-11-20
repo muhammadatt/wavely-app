@@ -196,7 +196,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: file tabs stay usable
       // during the render, and `state` follows the active tab. The commit and
@@ -214,13 +214,17 @@ const copies = pluginCopies((copy, life) => {
       try {
         const buffer = await renderRegion(segments, start, end, file)
         const bufferId = replaceRegion(start, end, buffer, 'Plosive Tamer', docId, selectionAtStart)
-        if (bufferId == null) return // the document closed while rendering
+        if (bufferId == null) return false // the document closed while rendering
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Plosive Tamer applied')
+        return true
       } catch (err) {
         console.error('Plosive Tamer failed:', err)
         showToast('Plosive Tamer failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !plPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(docId)
       }
@@ -303,3 +307,6 @@ const copies = pluginCopies((copy, life) => {
 export function usePlosive(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+usePlosive.builtCopies = () => copies.built()

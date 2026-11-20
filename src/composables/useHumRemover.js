@@ -85,6 +85,29 @@ const copies = pluginCopies((copy, life) => {
 
     const hasEnabledNotches = computed(() => humHarmonics.value.some(h => h.enabled))
 
+    /**
+     * Where the analysis stands, as structured state; the panel words it.
+     * `kind`: 'analysing' | 'none' (nothing analysed) | 'too-short' | 'stale'
+     * (the audio changed since) | 'pitched' (flagged energy follows a pitched
+     * source in the recording, so nothing is notched) | 'no-hum' | 'active'.
+     * `vetoed` lists the frequencies left out as part of the recording.
+     */
+    const humStatus = computed(() => {
+      if (humAnalyzing.value) return { kind: 'analysing' }
+      const a = humAnalysis.value
+      if (!a) return { kind: 'none' }
+      if (a.tooShort) return { kind: 'too-short' }
+      if (isStale.value) return { kind: 'stale' }
+      const vetoed = a.detectionDetail.filter(d => d.flagged && d.matchesPitchedSource).map(d => d.frequency)
+      const enabled = humHarmonics.value.filter(h => h.enabled).length
+      if (!a.triggered && enabled === 0) {
+        return vetoed.length > 0
+          ? { kind: 'pitched', vetoed, pitchedSourceHz: a.pitchedSourceHz }
+          : { kind: 'no-hum', anchorHz: a.anchorFrequency, anchorDeltaDb: a.anchorDeltaDb }
+      }
+      return { kind: 'active', enabled, vetoed }
+    })
+
     function initChain() {
       const ctx = getAudioContext()
       const chain = getEffectChain(ctx)
@@ -239,7 +262,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -258,9 +281,13 @@ const copies = pluginCopies((copy, life) => {
         showToast('Hum removed')
         // The audio just changed, so the measurement no longer describes it.
         clearAnalysis()
+        return true
       } catch (err) {
         console.error('Hum removal failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'Hum removal failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !humPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
@@ -303,6 +330,7 @@ const copies = pluginCopies((copy, life) => {
       humOutputLevels,
       isStale,
       hasEnabledNotches,
+      humStatus,
       hasSelection,
       togglePreview,
       analyze,
@@ -325,3 +353,6 @@ const copies = pluginCopies((copy, life) => {
 export function useHumRemover(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useHumRemover.builtCopies = () => copies.built()

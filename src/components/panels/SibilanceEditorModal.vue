@@ -12,9 +12,8 @@
  * between the IN and OUT ladders, the four attenuation controls under them,
  * and the four fade timings in a second row.
  */
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useSibilanceEditor } from '../../composables/useSibilanceEditor.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { DEV_TUNING_PANELS } from '../../devFlags.js'
 import { DEESSER_DEFAULTS } from '../../audio/effects/sibilanceEditor.js'
@@ -24,6 +23,7 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import GainReductionBar from '../meters/GainReductionBar.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import { useEntitlements } from '../../composables/useEntitlements.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -35,12 +35,14 @@ const {
   togglePreview, syncParam, analyze, apply, teardown, closeModal,
 } = useSibilanceEditor()
 
-const { state } = useEditorState()
-
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!preview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: preview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#e8a33d'
@@ -119,20 +121,6 @@ const statusLine = computed(() => {
 /** The live controls need the editor on and an envelope to reshape. */
 const controlsOff = computed(() => !preview.value || !envelopeValid.value)
 
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
-
 // The analysis needs an account (a free one), not a plan: say so before the
 // click rather than after it. Empty when signed in or accounts are off.
 const entitlements = useEntitlements()
@@ -151,7 +139,7 @@ const signInNote = computed(() => (entitlements.blocker('audioAnalysis') ? 'Log 
     :engaged="preview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     apply-feature="sibilanceEditor"
     :apply-disabled="!preview || !envelopeValid || treatedCount === 0"

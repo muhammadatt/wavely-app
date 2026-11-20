@@ -1,4 +1,4 @@
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { registerChainPlugin } from './usePluginChain.js'
@@ -11,7 +11,7 @@ import { regionAlignDb, regionPeakDb } from '../audio/analysisWindow.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain } from '../audio/effectChain.js'
 import { phatassEffect as soloPhatassEffect, PHATASS_DEFAULTS } from '../audio/effects/phatass.js'
-import { WARMTH_LAYERS, warmthActive, headBumpFor, headBumpMaxLiftDb } from '../audio/phatassParams.js'
+import { WARMTH_LAYERS, warmthActive, headBumpFor, headBumpMaxLiftDb, TAPE_SPEEDS } from '../audio/phatassParams.js'
 import { measureBandSpectrum, bandRefPeakDb } from '../audio/saturationBenchAnalysis.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { NeedleSpring, satMeterValue } from '../audio/dsp/saturationMeter.js'
@@ -559,7 +559,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -577,9 +577,13 @@ const copies = pluginCopies((copy, life) => {
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('PHATaSS applied')
+        return true
       } catch (err) {
         console.error('PHATaSS failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'PHATaSS failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !phPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
@@ -639,9 +643,19 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /**
+     * The reel turns with the tape — only while the plugin is heard and the
+     * transport runs — at the speed's seconds per turn (halving the speed
+     * doubles it; a bench-only position turns it at 30 IPS).
+     */
+    const phReelSpinning = computed(() => phPreview.value && state.isPlaying)
+    const phReelSeconds = computed(() => (TAPE_SPEEDS[phParams.hf] ?? TAPE_SPEEDS.ips30).reelSeconds)
+
     return {
       phParams,
       phPreview,
+      phReelSpinning,
+      phReelSeconds,
       phInputLevels,
       phOutputLevels,
       phSatNeedle,
@@ -668,3 +682,6 @@ const copies = pluginCopies((copy, life) => {
 export function usePhatass(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+usePhatass.builtCopies = () => copies.built()

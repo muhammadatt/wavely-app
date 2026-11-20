@@ -1,10 +1,7 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useScheps } from '../../composables/useScheps.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { pultecNetSections, pultecSections } from '../../audio/dsp/pultec.js'
-import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
 import ModulaLedPill from '../modula/ModulaLedPill.vue'
@@ -17,11 +14,13 @@ import {
   SCHEPS_PRESET_PLUGIN, SCHEPS_OUTPUT_MIN_DB, SCHEPS_OUTPUT_MAX_DB,
 } from '../../audio/pluginPresets/scheps.js'
 import { SCHEPS_DEFAULTS } from '../../audio/effects/schepsParams.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const pluginApi = useScheps()
 const {
+  responseDb,
   schepsCharacter, schepsSquash, schepsMix, schepsOutput,
   schepsAutoTrim, schepsAutoTrimBusy, schepsWetTrimDb,
   schepsPreview, schepsReduction, schepsInputLevels, schepsOutputLevels,
@@ -31,13 +30,15 @@ const {
 
 const presets = usePluginPresets(SCHEPS_PRESET_PLUGIN, schepsSettings(pluginApi))
 
-const { state } = useEditorState()
 
-// Default to engaged when the panel opens, matching the other plugin windows.
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!schepsPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: schepsPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#e8a33d'
@@ -82,23 +83,16 @@ function yFor(db) {
   return CURVE_H / 2 - (Math.max(-DB_RANGE, Math.min(DB_RANGE, db)) / DB_RANGE) * (CURVE_H / 2)
 }
 
-function pathFor(sections, sr) {
-  const db = magnitudeResponseDb(sections, CURVE_FREQS, sr)
+function pathFor(stage) {
+  const db = responseDb(CURVE_FREQS, stage)
   return CURVE_FREQS.map(
     (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${yFor(db[i]).toFixed(1)}`,
   ).join(' ')
 }
 
-// The response is sample-rate dependent, so use the file's rate where we have
-// one and fall back to the most common rate before a file is loaded.
-const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
-
-const prePath = computed(() =>
-  pathFor(pultecSections(sampleRate.value, schepsCharacter.value, 'pre'), sampleRate.value))
-const postPath = computed(() =>
-  pathFor(pultecSections(sampleRate.value, schepsCharacter.value, 'post'), sampleRate.value))
-const netPath = computed(() =>
-  pathFor(pultecNetSections(sampleRate.value, schepsCharacter.value), sampleRate.value))
+const prePath = computed(() => pathFor('pre'))
+const postPath = computed(() => pathFor('post'))
+const netPath = computed(() => pathFor('net'))
 
 const netFill = computed(
   () => `${netPath.value} L${CURVE_W},${yFor(0)} L0,${yFor(0)} Z`,
@@ -140,22 +134,6 @@ const TRACE_KEY = [
   { d: '1 3', c: 'rgba(255,255,255,.45)', t: 'Recovery' },
   { d: '', c: ACCENT, t: 'Net' },
 ]
-
-// Preview is transport playback — the worklet is already in the chain, so what
-// makes it live is that audio is running while you turn the knob.
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -173,7 +151,7 @@ async function applyAndClose() {
     :engaged="schepsPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!schepsPreview"
     apply-disabled-hint="Turn Scheps Parallel on to apply it"

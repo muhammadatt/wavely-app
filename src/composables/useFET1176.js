@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
@@ -12,7 +12,9 @@ import { fetDriveFor } from '../audio/effects/fet1176Params.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
 import { INPUT_TRIM_MAX_DB } from '../audio/dsp/inputAlign.js'
-import { FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB } from '../audio/fet1176Processor.js'
+import {
+  FET1176_OUTPUT_MIN_DB, FET1176_OUTPUT_MAX_DB, attackSecondsForDial, releaseSecondsForDial,
+} from '../audio/fet1176Processor.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const FET1176_WINDOW_ID = 'fet-punch'
@@ -290,6 +292,9 @@ const copies = pluginCopies((copy, life) => {
       // measured, and recorded under a key no real revision matches.
       const own = segments === state.segments
       const key = own ? timelineKey() : `${appState.activeDocumentId}:chain`
+      // A manual trim met on a different document goes back to AUTO, as in
+      // useLA2A.js — a fallback now: per-file settings re-bind the trim on a
+      // tab switch before this runs (perFilePluginSettings.js).
       const sameDoc = fetAlignedFor !== null
         && fetAlignedFor.split(':')[0] === String(appState.activeDocumentId)
       if (!fetInputAuto.value) {
@@ -559,7 +564,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -605,9 +610,13 @@ const copies = pluginCopies((copy, life) => {
         showToast(Math.abs(trimDb) >= 0.05
           ? `LA Classic 76 applied — peak restored ${trimDb >= 0 ? '+' : ''}${trimDb.toFixed(2)} dB`
           : 'LA Classic 76 compression applied')
+        return true
       } catch (err) {
         console.error('FET Punch failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'LA Classic 76 compression failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !fetPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
@@ -660,8 +669,24 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /**
+     * AUTO on: the measurement owns the input alignment again. AUTO off: the
+     * measured value becomes the hand-held starting point rather than jumping.
+     */
+    function setInputAlignAuto(on) {
+      if (on) enableInputAuto()
+      else syncInputAlign(fetInputAlignDb.value)
+    }
+
+    /** The Attack and Release dials as the time constants they set, seconds. */
+    const fetAttackSeconds = computed(() => attackSecondsForDial(fetAttack.value))
+    const fetReleaseSeconds = computed(() => releaseSecondsForDial(fetRelease.value))
+
     return {
       fetInputAlignDb,
+      setInputAlignAuto,
+      fetAttackSeconds,
+      fetReleaseSeconds,
       fetInputAuto,
       syncInputAlign,
       enableInputAuto,
@@ -710,3 +735,6 @@ const copies = pluginCopies((copy, life) => {
 export function useFET1176(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useFET1176.builtCopies = () => copies.built()

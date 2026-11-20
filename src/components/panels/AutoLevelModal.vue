@@ -26,17 +26,18 @@
  * a compliance report.
  */
 import { computed } from 'vue'
-import { useAutoLevel, skipReasonText } from '../../composables/useAutoLevel.js'
+import { useAutoLevel } from '../../composables/useAutoLevel.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { AUTOLEVEL_DEFAULTS } from '../../audio/dsp/autoLevel.js'
 import ModulaField from '../modula/ModulaField.vue'
 import FloatingWindow from './FloatingWindow.vue'
 import { radioArrowKey, radioTabStop } from '../../ui/radioKeys.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
-  params, processing, lastResult,
+  params, processing, lastRunSummary,
   syncParam, apply, closeModal,
 } = useAutoLevel()
 
@@ -63,46 +64,40 @@ const fmtSecs = v => `${Math.round(v)} s`
 const fmtFloor = v => `${Math.round(v)} dBFS`
 const parseNum = t => parseFloat(t)
 
-const measurements = computed(() => lastResult.value?.measurements ?? null)
-const declined = computed(() => (lastResult.value?.reason ? skipReasonText(lastResult.value.reason) : null))
+const run = computed(() => lastRunSummary.value)
+// "measurements" = the last run levelled, so its figures exist.
+const measurements = computed(() => (run.value && run.value.phrases != null ? run.value : null))
+const declined = computed(() => run.value?.declined ?? null)
 
-const resultPhrases = computed(() => (measurements.value ? String(measurements.value.clip_count_after_merge) : '—'))
+const resultPhrases = computed(() => (measurements.value ? String(measurements.value.phrases) : '—'))
 const resultSpread = computed(() => {
   const m = measurements.value
-  return m ? `${m.input_clip_lufs_std_db.toFixed(1)} → ${m.output_clip_lufs_std_db.toFixed(1)} dB` : '—'
+  return m ? `${m.spreadBeforeDb.toFixed(1)} → ${m.spreadAfterDb.toFixed(1)} dB` : '—'
 })
 const resultGain = computed(() => {
   const m = measurements.value
-  if (!m) return '—'
-  // gain_max_down_db is the solve's signed MINIMUM gain (−3.2 for a 3.2 dB
-  // cut, 0 when nothing was cut), so the cut is its magnitude; neither side
-  // prints a sign it does not have.
-  const cut = Math.max(0, -m.gain_max_down_db)
-  const boost = Math.max(0, m.gain_max_up_db)
-  return `−${cut.toFixed(1)} / +${boost.toFixed(1)} dB`
+  return m ? `−${m.cutDb.toFixed(1)} / +${m.boostDb.toFixed(1)} dB` : '—'
 })
 
 const modeStop = computed(() => radioTabStop(MODES, m => m.value === params.value.target_mode))
 
-function pickMode(m) {
-  if (!processing.value) syncParam('target_mode', m.value)
-}
+// syncParam refuses while a run is in flight.
+const pickMode = m => syncParam('target_mode', m.value)
 
 /**
  * The headroom cap is the one thing that silently changes what the controls
  * can do, so it says so rather than leaving Max boost looking broken.
  */
 const capNote = computed(() => {
-  const m = measurements.value
-  if (!m?.noise_floor_cap_active) return null
-  return m.max_up_effective_db <= 0.01
+  const cap = measurements.value?.cap
+  if (!cap) return null
+  return cap.boostDb === 0
     ? 'Room tone was too close to the floor to lift anything — only cuts were made.'
-    : `Boost was capped at ${m.max_up_effective_db.toFixed(1)} dB to keep room tone under the floor.`
+    : `Boost was capped at ${cap.boostDb.toFixed(1)} dB to keep room tone under the floor.`
 })
 
-async function applyAndClose() {
-  if (await apply()) closeModal()
-}
+// Apply-then-close (offline: the window stays open unless the run committed).
+const { applyAndClose } = usePluginWindow({ apply, closeModal, closeOnlyOnSuccess: true })
 </script>
 
 <template>

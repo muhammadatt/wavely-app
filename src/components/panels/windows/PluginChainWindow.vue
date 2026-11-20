@@ -31,6 +31,7 @@ import { baseId } from '../../../composables/pluginCopies.js'
 import FloatingWindow from '../FloatingWindow.vue'
 import PluginPicker from '../../PluginPicker.vue'
 import ModulaLedPill from '../../modula/ModulaLedPill.vue'
+import { requestTogglePlayback } from '../../../ui/transportBus.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -60,10 +61,6 @@ const memberWindowIds = computed(() => slots.value.map(s => baseId(s.windowId)))
 function pick(id) {
   pickerOpen.value = false
   add(id)
-}
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
 }
 
 // ── Drag to reorder ─────────────────────────────────────────────────────────
@@ -116,7 +113,7 @@ function onDragEnd() {
     :apply-disabled="!!blocker"
     :apply-disabled-hint="blocker"
     @toggle-engaged="setBypassed(!bypassed)"
-    @toggle-preview="togglePlayback"
+    @toggle-preview="requestTogglePlayback"
     @apply="apply()"
   >
     <div class="pc-panel">

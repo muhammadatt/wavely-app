@@ -1,4 +1,5 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { inflatorMaxLiftDb } from '../audio/inflatorParams.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { applyInflatorRegion, computePeakCache } from '../audio/processing.js'
@@ -154,7 +155,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -171,9 +172,13 @@ const copies = pluginCopies((copy, life) => {
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Cambridge Inflator applied')
+        return true
       } catch (err) {
         console.error('Inflator failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'Cambridge Inflator failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !inPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
@@ -205,7 +210,11 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /** The most lift the current settings can give, dB (the ladder shows what is applied now). */
+    const inMaxLiftDb = computed(() => inflatorMaxLiftDb(inCurve.value, inEffect.value))
+
     return {
+      inMaxLiftDb,
       inInputDb,
       inEffect,
       inCurve,
@@ -240,3 +249,6 @@ const copies = pluginCopies((copy, life) => {
 export function useInflator(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useInflator.builtCopies = () => copies.built()

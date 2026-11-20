@@ -7,10 +7,26 @@ import {
   applyHFLimiterRegion, computePeakCache,
 } from '../audio/processing.js'
 import { regionAlignDb } from '../audio/analysisWindow.js'
+import { shelfResponseDb } from '../audio/dsp/hfLimit.js'
+import {
+  FREQ_MIN_HZ, FREQ_MAX_HZ, THRESHOLD_MIN_DB, THRESHOLD_MAX_DB,
+  RANGE_MAX_DB, RELEASE_MIN_MS, RELEASE_MAX_MS, TRANSIENT_MAX_DB,
+} from '../audio/hfLimiterParams.js'
+import { HF_LIMITER_OUTPUT_MIN_DB, HF_LIMITER_OUTPUT_MAX_DB } from '../audio/pluginPresets/hfLimiter.js'
 import { ALIGN_TARGET_DBFS } from '../audio/dsp/inputAlign.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { hfLimiterEffect as soloHfLimiterEffect, HF_LIMITER_DEFAULTS } from '../audio/effects/hfLimiter.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+
+/** Each typed / dragged param's travel and step — the knobs' own. */
+export const HF_LIMITER_TRAVEL = {
+  threshold: { lo: THRESHOLD_MIN_DB, hi: THRESHOLD_MAX_DB, step: 0.5 },
+  freq: { lo: FREQ_MIN_HZ, hi: FREQ_MAX_HZ, step: 10 },
+  range: { lo: 0, hi: RANGE_MAX_DB, step: 0.5 },
+  transient: { lo: 0, hi: TRANSIENT_MAX_DB, step: 0.5 },
+  release: { lo: RELEASE_MIN_MS, hi: RELEASE_MAX_MS, step: 1 },
+  output: { lo: HF_LIMITER_OUTPUT_MIN_DB, hi: HF_LIMITER_OUTPUT_MAX_DB, step: 0.1 },
+}
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const HF_LIMITER_WINDOW_ID = 'hf-limiter'
@@ -141,6 +157,18 @@ const copies = pluginCopies((copy, life) => {
       pushParam(name, value)
     }
 
+    /**
+     * Set a param from a typed value or a drag: snapped to its control's step
+     * and clamped to its travel (an LCD or the curve's node has no range of its
+     * own). Unchanged values are not re-sent.
+     */
+    function setParamWithin(name, value) {
+      const t = HF_LIMITER_TRAVEL[name]
+      if (!t || !Number.isFinite(value)) return
+      const v = Math.max(t.lo, Math.min(t.hi, Math.round(value / t.step) * t.step))
+      if (v !== hflParams[name]) syncParam(name, v)
+    }
+
     /** A preset's controls, through the same path a knob turn takes. */
     function applyParams(p) {
       for (const [k, v] of Object.entries(p)) {
@@ -169,7 +197,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -187,9 +215,13 @@ const copies = pluginCopies((copy, life) => {
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('Hi-Freq Limiter applied')
+        return true
       } catch (err) {
         console.error('Hi-Freq Limiter failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'Hi-Freq Limiter failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !hflPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
@@ -227,7 +259,20 @@ const copies = pluginCopies((copy, life) => {
       closeWindow(windowId)
     }
 
+    /**
+     * The shelf's frequency response at `freqs`, dB, with its cut band at
+     * linear gain `gain` (1 = no cut), at the current Freq and shape and the
+     * file's rate (44.1 kHz before a file is loaded) — what the panel draws:
+     * the live cut, the Range floor and the node on it.
+     */
+    function responseDb(freqs, gain) {
+      const sr = state.currentFile?.sampleRate ?? 44100
+      return shelfResponseDb(sr, hflParams.freq, gain, freqs, hflParams.shape)
+    }
+
     return {
+      responseDb,
+      setParamWithin,
       hflParams,
       hflPreview,
       hflDelta,
@@ -254,3 +299,6 @@ const copies = pluginCopies((copy, life) => {
 export function useHFLimiter(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useHFLimiter.builtCopies = () => copies.built()

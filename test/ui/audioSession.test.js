@@ -122,6 +122,7 @@ function playbackContext() {
     sampleRate: 48000,
     destination: {},
     createBufferSource: () => ({ connect() {}, disconnect() {}, start() {}, stop() {}, onended: null }),
+    createGain: () => ({ connect() {}, disconnect() {} }),
   }
 }
 

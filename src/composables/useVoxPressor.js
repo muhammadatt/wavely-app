@@ -18,6 +18,7 @@ import {
 import { getEffectChain } from '../audio/effectChain.js'
 import { voxPressorEffect as soloEffect, VOX_DEFAULTS } from '../audio/effects/voxPressor.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
+import { createVoxReadouts } from './voxPressorReadouts.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
 export const VOX_WINDOW_ID = 'vox-pressor'
@@ -132,6 +133,13 @@ const copies = pluginCopies((copy, life) => {
   const voxInputLevels = ref([])
   const voxOutputLevels = ref([])
   let meterId = null
+
+  /** What the faceplate says — readouts, warnings, guide zones (voxPressorReadouts.js). */
+  const readouts = createVoxReadouts({
+    voxPeaks, voxBody, voxSpeed, voxParallel, voxParallelComp, voxPreview,
+    voxReadout, voxMeasured, voxBusy, voxUpstreamStale, voxPeaksStale,
+    voxPeaksGuide, voxBodyGuide, voxPeaksGr, voxBodyGr, voxParallelGr,
+  })
 
   /**
    * The voice's corner and median F0 are properties of the SPEAKER: measured
@@ -679,8 +687,8 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
-      if (!useEntitlements().request('voxPressor')) return
+      if (!state.selection) return false
+      if (!useEntitlements().request('voxPressor')) return false
       const { start, end } = state.selection
       const pin = pinActiveDocument('VoxPressor')
       const wasPreviewing = voxPreview.value
@@ -693,9 +701,13 @@ const copies = pluginCopies((copy, life) => {
         const bufferId = replaceRegion(start, end, buffer, 'VoxPressor', pin.docId, pin.selection)
         setPeakCache(bufferId, await computePeakCache(buffer, 256))
         showToast('VoxPressor applied')
+        return true
       } catch (err) {
         console.error('VoxPressor failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'VoxPressor failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !voxPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
@@ -776,6 +788,7 @@ const copies = pluginCopies((copy, life) => {
       syncDeEss, syncParallel, syncParallelComp, syncDensity,
       syncParallelDeEss, syncParallelSibEmph, syncParallelDeEssMode, syncDeEssSplit,
       refreshSolve, apply, teardown, openModal, closeModal,
+      ...readouts,
     }
   }
 
@@ -786,3 +799,6 @@ const copies = pluginCopies((copy, life) => {
 export function useVoxPressor(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useVoxPressor.builtCopies = () => copies.built()

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
 import { useEntitlements } from './useEntitlements.js'
@@ -36,11 +36,43 @@ export const AUTOLEVEL_WINDOW_ID = 'auto-leveler'
 const params = ref({ ...AUTOLEVEL_DEFAULTS })
 const processing = ref(false)
 /**
- * What the last Apply did, for the panel: { measurements } when it levelled,
- * { reason } when it declined. Cleared by nothing — it describes a past action
- * and says so ("Last run").
+ * What the last Apply did, for the panel, PER FILE: { measurements } when it
+ * levelled, { reason } when it declined. Cleared by nothing while the file is
+ * open — it describes a past action and says so ("Last run") — and another tab
+ * shows its own last run, or none.
  */
-const lastResult = ref(null)
+const lastResults = ref({})
+const { appState } = useEditorState()
+const lastResult = computed(() => lastResults.value[appState.activeDocumentId] ?? null)
+
+/** Record what a run on `docId` did (apply calls it; exported for tests). */
+export function recordAutoLevelResult(docId, result) {
+  lastResults.value = { ...lastResults.value, [docId]: result }
+}
+
+/** Forget the last runs of files that are no longer open. */
+export function forgetAutoLevelResults(openIds) {
+  const open = new Set(openIds)
+  if (Object.keys(lastResults.value).some(id => !open.has(id))) {
+    lastResults.value = Object.fromEntries(Object.entries(lastResults.value).filter(([id]) => open.has(id)))
+  }
+}
+
+/**
+ * Auto Leveler's settings, for per-file save and restore. Known keys only, and
+ * written straight in: a run in flight took its own copy when it started, so a
+ * tab switch mid-run changes nothing it renders.
+ */
+export const autoLevelSettingsIO = {
+  read: () => ({ ...params.value }),
+  write: (p) => {
+    const next = { ...params.value }
+    for (const k of Object.keys(AUTOLEVEL_DEFAULTS)) {
+      if (p && k in p && typeof p[k] === typeof AUTOLEVEL_DEFAULTS[k]) next[k] = p[k]
+    }
+    params.value = next
+  },
+}
 
 /** Why the leveler declined, in the user's terms rather than the enum's. */
 export function skipReasonText(reason) {
@@ -58,6 +90,31 @@ export function skipReasonText(reason) {
   }
 }
 
+/**
+ * The last run as figures, for the panel's LAST RUN card: null before any run;
+ * else `declined` (the reason's text, or null when it levelled) and, when it
+ * levelled, phrases, the phrase-loudness spread before / after, the deepest cut
+ * and the largest boost (both dB ≥ 0), and `cap` when the room-tone floor
+ * limited the boosts — `{ boostDb }`, 0 when it allowed none.
+ */
+export const lastRunSummary = computed(() => {
+  const r = lastResult.value
+  if (!r) return null
+  const m = r.measurements
+  if (!m) return { declined: skipReasonText(r.reason) }
+  return {
+    declined: r.reason ? skipReasonText(r.reason) : null,
+    phrases: m.clip_count_after_merge,
+    spreadBeforeDb: m.input_clip_lufs_std_db,
+    spreadAfterDb: m.output_clip_lufs_std_db,
+    // gain_max_down_db is the solve's signed MINIMUM gain (−3.2 for a 3.2 dB
+    // cut, 0 when nothing was cut), so the cut is its magnitude.
+    cutDb: Math.max(0, -m.gain_max_down_db),
+    boostDb: Math.max(0, m.gain_max_up_db),
+    cap: m.noise_floor_cap_active ? { boostDb: m.max_up_effective_db <= 0.01 ? 0 : m.max_up_effective_db } : null,
+  }
+})
+
 export function useAutoLevel() {
   const {
     state, hasSelection, replaceRegion, setPeakCache,
@@ -66,7 +123,9 @@ export function useAutoLevel() {
   const entitlements = useEntitlements()
   const { openWindow, closeWindow } = useWindows()
 
+  /** Set one param. Refused while a run is in flight (its controls are dimmed). */
   function syncParam(name, value) {
+    if (processing.value) return
     params.value = { ...params.value, [name]: value }
   }
 
@@ -121,7 +180,7 @@ export function useAutoLevel() {
       const solved = prepared.applicable ? solveAutoLevel(prepared, settings) : null
       if (!solved?.applied) {
         const reason = prepared.applicable ? solved.reason : prepared.reason
-        lastResult.value = { reason }
+        recordAutoLevelResult(pin.docId, { reason })
         showToast(skipReasonText(reason))
         return false
       }
@@ -135,7 +194,7 @@ export function useAutoLevel() {
       setPeakCache(bufferId, cache)
 
       const m = solved.measurements
-      lastResult.value = { measurements: m }
+      recordAutoLevelResult(pin.docId, { measurements: m })
       showToast(
         `Levelled ${m.clip_count_after_merge} phrases — ` +
         `spread ${m.input_clip_lufs_std_db.toFixed(1)} → ` +
@@ -154,7 +213,7 @@ export function useAutoLevel() {
   }
 
   return {
-    params, processing, lastResult, hasSelection,
+    params, processing, lastResult, lastRunSummary, hasSelection,
     syncParam, resetParams, apply,
     openModal: () => openWindow(AUTOLEVEL_WINDOW_ID),
     closeModal: () => closeWindow(AUTOLEVEL_WINDOW_ID),

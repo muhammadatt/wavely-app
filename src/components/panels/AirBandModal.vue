@@ -1,10 +1,7 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useAirBand } from '../../composables/useAirBand.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
-import { airBandSections } from '../../audio/airBandProcessor.js'
-import { magnitudeResponseDb } from '../../audio/dsp/biquad.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
@@ -14,24 +11,28 @@ import { AIR_BOOST_PRESET_PLUGIN } from '../../audio/pluginPresets/airBoost.js'
 import {
   AIR_BAND_DEFAULTS, AIR_MAX_DB, AIR_OUTPUT_MIN_DB, AIR_OUTPUT_MAX_DB,
 } from '../../audio/airBandParams.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const pluginApi = useAirBand()
 const {
+  responseDb,
   airBandAir, airBandOutput, airBandPreview, airBandInputLevels, airBandOutputLevels,
   togglePreview, syncAir, syncOutput, applyParams, apply, teardown, closeModal,
 } = pluginApi
 
 const presets = usePluginPresets(AIR_BOOST_PRESET_PLUGIN, airBandSettings(pluginApi))
 
-const { state } = useEditorState()
 
-// Default to engaged when the panel opens, matching the other plugin windows.
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!airBandPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: airBandPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#8fd48a'
@@ -62,11 +63,7 @@ function yFor(db) {
 }
 
 const curvePath = computed(() => {
-  // The response is sample-rate dependent, so use the file's rate where we
-  // have one and fall back to the most common rate before a file is loaded.
-  const sr = state.currentFile?.sampleRate ?? 44100
-  const sections = airBandSections(sr, airBandAir.value)
-  const db = magnitudeResponseDb(sections, CURVE_FREQS, sr)
+  const db = responseDb(CURVE_FREQS)
   return CURVE_FREQS.map(
     (f, i) => `${i === 0 ? 'M' : 'L'}${xFor(f).toFixed(1)},${yFor(db[i]).toFixed(1)}`,
   ).join(' ')
@@ -106,22 +103,6 @@ function gridLabelStyle(freqHz) {
     transform: 'translateX(-50%)',
   }
 }
-
-// Preview is transport playback — the worklet is already in the chain, so what
-// makes it live is that audio is running while you turn the knob.
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -139,7 +120,7 @@ async function applyAndClose() {
     :engaged="airBandPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!airBandPreview"
     apply-disabled-hint="Turn Air Boost on to apply it"

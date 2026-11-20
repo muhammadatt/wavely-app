@@ -260,6 +260,30 @@ export function quantizeQ(q) {
   return Math.round(q * 100) / 100
 }
 
+/**
+ * Shapes with no gain term. These cut by construction — a notch is a full null
+ * at its centre, a pass filter removes everything past its corner — and the
+ * kernel's (and RBJ's) notch and pass filters take no gain at all. A band of
+ * one of these keeps whatever gainDb it carried in from its previous type;
+ * that number is not on its curve, so nothing may draw or scale by it.
+ * Said once here: the plot's axis, its handles and the strip's gain field
+ * each had their own copy.
+ */
+export const GAINLESS_TYPES = new Set(['notch', 'highpass', 'lowpass'])
+
+/** Whether a filter type has a gain term (see GAINLESS_TYPES). */
+export function hasGainTerm(type) {
+  return !GAINLESS_TYPES.has(type)
+}
+
+/** One scroll step's change in Q: multiplicative, so it feels the same at Q 0.5 and Q 8. */
+export const Q_NUDGE = 1.15
+
+/** Q after one scroll step: `direction` > 0 narrows, otherwise widens. */
+export function nudgeQ(q, direction) {
+  return q * (direction > 0 ? Q_NUDGE : 1 / Q_NUDGE)
+}
+
 /** Legal Q range for a filter type. */
 export function qRangeFor(type) {
   return PARAM_RANGES.q[type] ?? PARAM_RANGES.q.peaking

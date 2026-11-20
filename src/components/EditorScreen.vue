@@ -4,6 +4,7 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { useFileImport } from '../composables/useFileImport.js'
 import { useFileSave } from '../composables/useFileSave.js'
 import { useWindows } from '../composables/useWindows.js'
+import { installPerFilePluginSettings } from '../composables/perFilePluginSettings.js'
 import TopBar from './TopBar.vue'
 import FileTabs from './FileTabs.vue'
 import FloatingToolbar from './FloatingToolbar.vue'
@@ -17,6 +18,7 @@ import ContextPanel from './ContextPanel.vue'
 import EmptyState from './EmptyState.vue'
 import ProcessingOverlay from './ProcessingOverlay.vue'
 import RotateHint from './RotateHint.vue'
+import { requestTogglePlayback } from '../ui/transportBus.js'
 
 const {
   state, appState, performCut, performCopy, performPaste,
@@ -26,6 +28,7 @@ const {
   documents, cycleDocument, setActiveDocument, closeDocument,
   documentHasUnsavedWork, anyUnsavedWork, activeDoc,
 } = useEditorState()
+installPerFilePluginSettings()
 const { importDataTransfer, promptForFiles } = useFileImport()
 const { saveDocument, saveDocumentAs } = useFileSave()
 const { closeTopWindow, anyWindowOpen } = useWindows()
@@ -196,7 +199,7 @@ function handleKeydown(e) {
   if (e.code === 'Space') {
     e.preventDefault()
     if (e.target instanceof HTMLElement && e.target !== document.body) e.target.blur()
-    window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
+    requestTogglePlayback()
     return
   }
 

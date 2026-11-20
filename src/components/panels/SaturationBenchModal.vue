@@ -16,9 +16,8 @@
  * FULL, so there is no mode switch, and the bypass mutes the pair without moving
  * its gain.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useSaturationBench } from '../../composables/useSaturationBench.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
 import { useEditorState } from '../../composables/useEditorState.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaChip from '../modula/ModulaChip.vue'
@@ -36,6 +35,7 @@ import {
   SAT_DRIVE_MIN_DB, SAT_DRIVE_MAX_DB, SAT_AMOUNT_MIN_DB, SAT_AMOUNT_MAX_DB,
   SAT_BAND_MIN_HZ, SAT_BAND_MAX_HZ, SAT_BAND_HIGH_MIN_HZ,
 } from '../../audio/saturationBenchProcessor.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -51,10 +51,14 @@ const { state } = useEditorState()
 // A preset is the whole stack and the trims; SOLO and everything measured stay out.
 const presets = usePluginPresets(SATURATION_BENCH_PRESET_PLUGIN, saturationBenchSettings(pluginApi))
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!sbPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: sbPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#e8a33d'
@@ -162,20 +166,6 @@ function bandCaption(l) {
   if (lowOpen) return `BELOW ${formatHz(l.hiHz)}`
   return `${formatHz(l.loHz)}–${formatHz(l.hiHz)}`
 }
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -198,7 +188,7 @@ async function applyAndClose() {
     delta-title="Hear only what the layers add"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!sbPreview"
     apply-disabled-hint="Turn Saturation Workbench on to apply it"

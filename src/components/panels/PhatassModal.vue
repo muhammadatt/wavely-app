@@ -20,10 +20,8 @@
  * explanatory paragraph are off this panel (owner's call); the tooltips carry
  * what the captions said. The bench rows still render under it in dev builds.
  */
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { usePhatass } from '../../composables/usePhatass.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
-import { useEditorState } from '../../composables/useEditorState.js'
 import { phatassSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { PHATASS_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
@@ -41,23 +39,27 @@ import PhatassBenchPanel from './PhatassBenchPanel.vue'
 import { isPhatassBenchVisible } from '../../audio/effects/phatassBench.js'
 import LevelMeter from '../meters/LevelMeter.vue'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const pluginApi = usePhatass()
 const {
-  phParams, phPreview, phInputLevels, phOutputLevels, phSatNeedle, phOutputMakeup,
+  phParams, phPreview, phReelSpinning, phReelSeconds, phInputLevels, phOutputLevels, phSatNeedle, phOutputMakeup,
   togglePreview, syncParam, applyParams, apply, teardown, closeModal,
 } = pluginApi
 
-const { state } = useEditorState()
 
 const presets = usePluginPresets(PHATASS_PRESET_PLUGIN, phatassSettings(pluginApi))
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!phPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: phPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 const ACCENT = '#e8a33d'
@@ -85,36 +87,18 @@ const CHARACTER_OPTIONS = CHARACTERS.map(c => ({ ...c, title: CHARACTER_TITLES[c
 const characterValue = computed(() => Number(phParams.oddEven))
 
 // Fastest first, as a tape counter reads: the drum steps down toward less
-// headroom. `period` is the reel's seconds per turn — halving the speed
-// doubles it.
+// headroom. The reel's speed per detent lives with the speeds (TAPE_SPEEDS).
 const SPEED_OPTIONS = [
-  { value: 'ips30', label: '30', period: 1.6, title: '30 IPS: the most HF headroom. Only the brightest passages sag a little at the very top; the head bump is gentlest' },
-  { value: 'ips15', label: '15', period: 3.2, title: '15 IPS: bright passages lose some top end, more as they get hotter. Attacks stay bright' },
-  { value: 'ips7', label: '7.5', period: 6.4, title: '7.5 IPS: the least HF headroom. The top end darkens on anything bright and the loss reaches into the upper mids; the head bump is lowest' },
+  { value: 'ips30', label: '30', title: '30 IPS: the most HF headroom. Only the brightest passages sag a little at the very top; the head bump is gentlest' },
+  { value: 'ips15', label: '15', title: '15 IPS: bright passages lose some top end, more as they get hotter. Attacks stay bright' },
+  { value: 'ips7', label: '7.5', title: '7.5 IPS: the least HF headroom. The top end darkens on anything bright and the loss reaches into the upper mids; the head bump is lowest' },
 ]
 // A bench-only position (OFF) shows on the drum rather than lighting a speed it is not.
 const speedOptions = computed(() => (SPEED_OPTIONS.some(o => o.value === phParams.hf)
   ? SPEED_OPTIONS
   : [...SPEED_OPTIONS, { value: phParams.hf, label: String(phParams.hf).toUpperCase(), title: 'Set on the bench' }]))
-const reelPeriod = computed(() => SPEED_OPTIONS.find(o => o.value === phParams.hf)?.period ?? SPEED_OPTIONS[0].period)
-// The reel runs with the tape: only while the plugin is heard.
-const reelSpinning = computed(() => phPreview.value && state.isPlaying)
 
 const satReading = computed(() => (phPreview.value ? `${Math.round(phSatNeedle.value)}%` : 'OFF'))
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
 </script>
 
 <template>
@@ -131,7 +115,7 @@ async function applyAndClose() {
     :engaged="phPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!phPreview"
     apply-disabled-hint="Turn PHATaSS on to apply it"
@@ -171,7 +155,7 @@ async function applyAndClose() {
                 />
               </div>
               <div class="ph-col ph-reel-col" data-help="tape-speed" title="TAPE SPEED: the treble sags on bright, hot passages — slower tape sags sooner, deeper and further down — while attacks stay bright, and Drive makes it sag harder. The speed also sets Drive's head bump, an octave lower at each slower speed">
-                <ModulaReel :size="100" :spinning="reelSpinning" :period="reelPeriod" />
+                <ModulaReel :size="100" :spinning="phReelSpinning" :period="phReelSeconds" />
                 <ModulaDrumCounter
                   :model-value="phParams.hf" :options="speedOptions" label="Tape speed (IPS)" :disabled="!phPreview"
                   @update:model-value="v => syncParam('hf', v)"

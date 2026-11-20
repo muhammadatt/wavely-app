@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useEntitlements } from './useEntitlements.js'
 import { useWindows } from './useWindows.js'
@@ -65,6 +65,22 @@ let held = null // { docId, revision, start, end, paramsKey, sampleRate, wet }
 const HOLD_MAX_SECONDS = 10 * 60
 const SAME_TIME_EPS = 1e-6
 
+/**
+ * Noise Reduction's settings, for per-file save and restore. Known keys only,
+ * written straight in: a run in flight took its own copy when it started.
+ */
+export const noiseReductionSettingsIO = {
+  read: () => ({ ...params }),
+  write: (p) => {
+    for (const k of Object.keys(NOISE_REDUCTION_DEFAULTS)) {
+      if (!p || !(k in p)) continue
+      const d = NOISE_REDUCTION_DEFAULTS[k]
+      // `engine` may be null (both passes off) as well as a string.
+      if (k === 'engine' ? (p[k] === null || typeof p[k] === 'string') : typeof p[k] === typeof d) params[k] = p[k]
+    }
+  },
+}
+
 const STAGE_TEXT = {
   upload: 'Uploading the selection',
   denoise: 'Denoising on the server',
@@ -87,7 +103,17 @@ export function useNoiseReduction() {
   const entitlements = useEntitlements()
   const { openWindow, closeWindow } = useWindows()
 
+  /** Which passes the mode runs: Clean (DF3) and Deep Clean (RNNoise). */
+  const cleanOn = computed(() => usesDf3(params.engine))
+  const deepOn = computed(() => usesRnnoise(params.engine))
+
+  // Every setter refuses while a run is in flight (its controls are dimmed;
+  // the run took its own copy of the settings when it started), and a pass's
+  // own setting refuses while the mode leaves that pass out — its card is
+  // dimmed too.
+
   function setEngine(engine) {
+    if (processing.value) return
     params.engine = engine
   }
 
@@ -97,20 +123,28 @@ export function useNoiseReduction() {
    * on from that state brings back only that pass.
    */
   function setPass(pass, on) {
+    if (processing.value) return
     const deep = pass === 'df3' ? on : usesDf3(params.engine)
     const light = pass === 'rnnoise' ? on : usesRnnoise(params.engine)
     params.engine = engineFor(deep, light)
   }
 
   function setDf3Limit(v) {
+    if (processing.value || !cleanOn.value) return
     params.df3LimitDb = v
   }
 
   function setProtectConsonants(on) {
+    if (processing.value || !deepOn.value) return
     params.protectConsonants = on
   }
 
+  function toggleProtectConsonants() {
+    setProtectConsonants(!params.protectConsonants)
+  }
+
   function setMix(v) {
+    if (processing.value) return
     params.mix = v
   }
 
@@ -262,10 +296,13 @@ export function useNoiseReduction() {
     params,
     processing,
     hasSelection,
+    cleanOn,
+    deepOn,
     setEngine,
     setPass,
     setDf3Limit,
     setProtectConsonants,
+    toggleProtectConsonants,
     setMix,
     resetParams,
     apply,

@@ -10,6 +10,7 @@ import { levelOffsetDbFor } from '../audio/deEsserProcessor.js'
 import { getEffectChain, getEffectChainIfExists } from '../audio/effectChain.js'
 import { deEsserEffect as soloDeEsserEffect, DE_ESSER_DEFAULTS } from '../audio/effects/deEsser.js'
 import { splitAmount, amountSplitOf } from '../audio/deEsserParams.js'
+import { softenLaw } from '../audio/deEsserSoftenStage.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 
 // Registry id of this plugin's window. Must match the entry in src/ui/registry.js.
@@ -80,6 +81,15 @@ const copies = pluginCopies((copy, life) => {
   const hfInputLevels = ref([])
   const hfOutputLevels = ref([])
   let meterId = null
+
+  /**
+   * Everything the plugin is taking off right now, dB: Duck + EQ, plus Reso
+   * and Soften only while they are in (their meters hold a last value).
+   */
+  const hfTotalReduction = computed(() => hfReduction.value + hfBroadband.value
+    + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
+  /** The deepest cut the Soften knob allows on one attack, dB (0 = off). */
+  const hfSoftenDepthDb = computed(() => softenLaw(hfSoften.value).depthDb)
 
   function currentParams() {
     return {
@@ -454,7 +464,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -472,9 +482,13 @@ const copies = pluginCopies((copy, life) => {
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('De-Esser applied')
+        return true
       } catch (err) {
         console.error('De-Esser failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'De-Esser failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !hfPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
@@ -554,6 +568,7 @@ const copies = pluginCopies((copy, life) => {
       hfDelta,
       hfPreview,
       hfReduction,
+      hfTotalReduction, hfSoftenDepthDb,
       hfReso,
       hfAirLamp,
       getScope,
@@ -598,3 +613,6 @@ const copies = pluginCopies((copy, life) => {
 export function useDeEsser(copy) {
   return copies(copy)()
 }
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useDeEsser.builtCopies = () => copies.built()

@@ -1,5 +1,5 @@
 import { getSegmentDuration } from './operations.js'
-import { getEffectChainIfExists } from './effectChain.js'
+import { getEffectChain, getEffectChainIfExists } from './effectChain.js'
 import { setPlaybackAudioSession } from '../platform/audioSession.js'
 
 /**
@@ -77,8 +77,13 @@ function scheduleSegments(segments, from, to, at, audioContext, pass) {
 
     const node = audioContext.createBufferSource()
     node.buffer = seg.sourceBuffer
-    const chain = getEffectChainIfExists()
-    node.connect(chain ? chain.getInputNode() : audioContext.destination)
+    // ⚠ ALWAYS THROUGH THE CHAIN, CREATING IT IF NEED BE. Sources used to go
+    // straight to the destination when no chain existed yet, and a node keeps
+    // the connection it was started with — so the first plugin opened while
+    // audio played (which is what creates the chain) never heard that pass,
+    // and only came alive once the transport was restarted. An empty chain is
+    // two gain nodes in series, input → output.
+    node.connect(getEffectChain(audioContext).getInputNode())
 
     const scheduleAt = at + Math.max(0, seg.outputStart - from)
     // Starting in the middle of a segment reads into it by the same amount.

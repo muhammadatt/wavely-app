@@ -348,19 +348,25 @@ test('the setter highlight is derived from the ceiling, never remembered', () =>
   // The consequence worth keeping: it is not a selection. Land on a preset's
   // value by dragging the line and its button lights, which is correct — the
   // button describes a value, and that value is what the ceiling holds.
-  const panel = read('../../src/components/panels/SoftClipperModal.vue')
-  const setters = panel.slice(panel.indexOf('const ceilingSetters = computed'))
+  // Decided in the composable (panels draw; composables decide); the panel
+  // only prints the number.
+  const composable = read('../../src/composables/useSoftClipper.js')
+  const setters = composable.slice(composable.indexOf('const ceilingSetters = computed'))
   const body = setters.slice(0, setters.indexOf('}))') + 3)
   assert.match(body, /fixedThresholdDb\.value/,
     'the highlight does not compare against the live ceiling')
   assert.match(body, /SETTER_MATCH_DB/)
   // No stored selection anywhere: a ref holding the active id would be the
   // latch coming back by another name.
-  assert.doesNotMatch(panel, /activeSetter\s*=\s*ref|selectedPreset\s*=\s*ref/)
+  const panel = read('../../src/components/panels/SoftClipperModal.vue')
+  for (const src of [panel, composable]) {
+    assert.doesNotMatch(src, /activeSetter\s*=\s*ref|selectedPreset\s*=\s*ref/)
+  }
+  assert.match(panel, /ceilingSetters: measuredSetters/)
 
   // The tolerance has to be tighter than one detent of the ceiling knob, or a
   // nudge would leave the old button lit.
-  const tol = Number(panel.match(/const SETTER_MATCH_DB = ([\d.]+)/)[1])
+  const tol = Number(composable.match(/export const SETTER_MATCH_DB = ([\d.]+)/)[1])
   assert.ok(tol > 0 && tol < 0.5,
     `SETTER_MATCH_DB ${tol} is not inside one 0.5 dB knob step`)
 })

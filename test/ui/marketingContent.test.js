@@ -149,13 +149,15 @@ test('a sample’s settings have a way into its window', () => {
   for (const m of registry.matchAll(/\n {4}id: '([^']+)',[\s\S]*?\n {2}\},/g)) {
     if (/\bchain: true\b/.test(m[0])) chainable.add(m[1])
   }
-  const HANDOFF = new Set(['loudness'])
+  // Each handed-off window, and the file that takes its settings (the
+  // window's composable, since the panel only draws).
+  const HANDOFF = new Map([['loudness', 'src/composables/useLoudnessNormalize.js']])
   for (const [id, page] of Object.entries(MARKETING)) {
     for (const s of page.samples ?? []) {
       if (!Object.keys(s.settings ?? {}).length) continue
       assert.ok(chainable.has(id) || HANDOFF.has(id), `${id}/${s.id}: settings would be dropped`)
       if (HANDOFF.has(id)) {
-        const src = readFileSync(join(ROOT, 'src/components/panels/windows/LoudnessWindow.vue'), 'utf8')
+        const src = readFileSync(join(ROOT, HANDOFF.get(id)), 'utf8')
         assert.match(src, new RegExp(`pendingWindowSettings\\('${id}'\\)`))
       }
     }

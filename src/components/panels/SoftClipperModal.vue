@@ -1,9 +1,6 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useSoftClipper } from '../../composables/useSoftClipper.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
-import { useEditorState } from '../../composables/useEditorState.js'
-import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import { SCOPE_SECONDS } from '../../audio/effects/softClipper.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaSegmented from '../modula/ModulaSegmented.vue'
@@ -13,12 +10,14 @@ import LevelMeter from '../meters/LevelMeter.vue'
 import ClipperScope from '../meters/ClipperScope.vue'
 import { lampFraction } from '../meters/ballistics.js'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
+import { useTimelineEnvelope } from '../../composables/useScopeFeeds.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const {
   headroomDb, outputTrimDb, thresholdMode, fixedThresholdDb, shape, limiter,
-  limiterMode, LIMITER_MODES, setLimiterMode, limiterLatencyMs,
+  limiterMode, LIMITER_MODES, setLimiterMode, limiterCaption, ceilingDisabledReason,
   emphasisDb, tuningOn,
   clipperPreview, clipperReductionHeld, clipperReductionReadout,
   clipperEngagedReadout, clipperLiftDb,
@@ -30,46 +29,25 @@ const {
   SOFT_CLIPPER_MAKEUP_MIN_DB, SOFT_CLIPPER_MAKEUP_MAX_DB,
   syncFixedThreshold,
   setShape, apply, teardown, closeModal,
-  ceilingBusy, CEILING_PRESETS, 
-  ceilingChoices, setCeilingFromPreset,
+  ceilingSetters: measuredSetters, setCeilingFromPreset,
 } = useSoftClipper()
 
-const { state } = useEditorState()
 
 /**
- * The scope's view of the timeline around the playhead.
- *
- * It comes from here rather than from the effect because the effect has not
- * seen it — the kernel's ring only ever holds audio it has already processed,
- * which is nothing at all when the stage is bypassed and nothing ahead of the
- * playhead ever. The scope asks for the half ahead always, and for the half
- * behind whenever its ring is not live, so that bypassing the stage leaves one
- * waveform still travelling past the playhead rather than half a frozen one.
- *
- * Read live from `state.playhead`, which the transport advances every frame, so
- * the picture slides under a stationary playhead. It also works with the
- * transport stopped: park the playhead before a loud passage and the scope
- * shows what the current setting would do to it before anything is heard.
- *
- * ONE SCRATCH PER SIDE. Both are alive in the same frame, so a single shared
- * buffer would have the second call overwrite the first — the two halves would
- * show the same audio.
+ * The scope's view of the timeline around the playhead — read from the
+ * timeline, not the effect, so it shows audio the kernel has not processed
+ * (useScopeFeeds.js).
  */
-const envelopeScratch = { ahead: null, behind: null }
-function envelope(offsetSeconds, seconds, columns) {
-  if (!state.segments?.length) return null
-  const side = offsetSeconds < 0 ? 'behind' : 'ahead'
-  if (envelopeScratch[side]?.length !== columns) envelopeScratch[side] = new Float32Array(columns)
-  return readTimelineEnvelope(
-    state.segments, state.playhead + offsetSeconds, seconds, columns, envelopeScratch[side],
-  )
-}
+const envelope = useTimelineEnvelope()
 
-// Default to engaged when the panel opens
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!clipperPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: clipperPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 // The kit's amber, like every Modula panel. The admin tuning panel keeps its
@@ -127,59 +105,6 @@ const SHAPE_CAPTION = {
   tanh2: '3 dB over → −0.7 · 8 → −3.3 · 12 → −4.7 dB',
   tanh3: '3 dB over → −0.4 · 8 → −3.3 · 12 → −4.9 dB',
   tanh4: '3 dB over → −0.2 · 8 → −3.3 · 12 → −5.1 dB',
-}
-
-/**
- * Why the ceiling presets cannot be clicked, or null when they can.
- *
- * ⚠ THEY NEEDED A REASON, NOT JUST A DISABLED ATTRIBUTE. Reported from use: the
- * buttons do nothing with no selection made, and nothing on the panel says so.
- * Two separate bugs behind that. `applyCeilingPreset` bails on a missing
- * selection but the button was never marked disabled for it, so the click was
- * accepted and silently dropped — the worst of the three states. And the
- * disabled styling that did exist covered only the bypassed case, so a busy or
- * unclickable button looked exactly like a clickable one.
- *
- * A preset MEASURES THE SELECTED REGION, so a selection is not incidental to it
- * — it is the input. Saying which of the three reasons applies is what turns a
- * dead button into an instruction.
- */
-const ceilingDisabledReason = computed(() => {
-  if (!clipperPreview.value) return 'Turn Soft Clipper on to measure a ceiling'
-  if (!hasSelection.value) return 'Select a region — the preset measures its peaks'
-  if (ceilingBusy.value) return 'Measuring…'
-  return null
-})
-
-/**
- * The one thing that decides between the two positions.
- *
- * ⚠ THE CAPTION COMES FROM THE MODE TABLE, not from a branch here. Two places
- * describing the same switch drift, and the one on the faceplate is the one a
- * user reads. The latency each costs is in the buttons' titles — see
- * LIMITER_MODES for why it is disclosed there rather than on the faceplate.
- */
-const limiterCaption = computed(() => {
-  const mode = LIMITER_MODES.find(m => m.id === limiterMode.value)
-  if (mode) return mode.caption
-  // The admin knob has been put between the two. Say where, rather than
-  // lighting a position it is not at.
-  const sr = state.currentFile?.sampleRate ?? 44100
-  return `limiter ${limiter} · ${limiterLatencyMs(sr).toFixed(1)} ms`
-})
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
 }
 
 function formatGain(v) {
@@ -330,48 +255,11 @@ const engagedText = computed(() => `${clipperEngagedReadout.value.toFixed(0)}%`)
  */
 const METER_LEN = 300
 
-/**
- * How close the ceiling has to be to a setter's value to count as "this is what
- * the ceiling is holding", in dB.
- *
- * Tight enough that one detent of the knob clears it — the knob's step is 0.5 —
- * and loose enough to survive the float round trip through the worker and the
- * kernel. It is a tolerance on equality, not a range.
- */
-const SETTER_MATCH_DB = 0.05
-
-/**
- * The four ceiling setters, each carrying the dBFS it would write and whether
- * the ceiling is currently sitting on it.
- *
- * ⚠ THE HIGHLIGHT IS DERIVED, NOT REMEMBERED, and that is the whole of why it
- * is safe. A stored "last clicked" flag is a claim about the past that stops
- * being true the moment the knob or the line moves — the readout-goes-stale
- * failure this panel has already shipped once, as a latching preset lamp.
- * Comparing the setter's own number against the live ceiling asks a question
- * about the PRESENT instead: it lights when they agree and goes out when they
- * do not, with nothing to clear and no way to be wrong.
- *
- * It is therefore not a selection. Land on a preset's value by dragging the
- * line and its button lights, which is correct — the button describes a value,
- * and that value is what the ceiling holds.
- *
- * ⚠ A BUTTON WITH NO NUMBER IS DISABLED RATHER THAN OPTIMISTIC. Until the
- * region has been measured there is nothing to promise, and a setter that
- * writes an unknown value on click is the failure the printed number exists to
- * remove.
- */
-const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
-  const db = ceilingChoices.value[p.id]
-  const ready = Number.isFinite(db)
-  return {
-    ...p,
-    db: ready ? `${db.toFixed(1)}` : '—',
-    ready,
-    active: ready && Math.abs(db - fixedThresholdDb.value) <= SETTER_MATCH_DB,
-  }
-}))
-
+// The setters (useSoftClipper's `ceilingSetters`), their dBFS printed.
+const ceilingSetters = computed(() => measuredSetters.value.map(p => ({
+  ...p,
+  db: p.ready ? p.db.toFixed(1) : '—',
+})))
 </script>
 
 <template>
@@ -391,7 +279,7 @@ const ceilingSetters = computed(() => CEILING_PRESETS.map(p => {
     delta-title="Hear only what is being removed — the harmonics the clipper is generating, on their own. Monitoring only: Apply always renders the processed audio."
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!clipperPreview"
     apply-disabled-hint="Turn Soft Clipper on to apply it"

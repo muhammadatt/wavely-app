@@ -6,6 +6,7 @@ import { pluginSettingsIO, writePluginSettings } from './pluginSettings.js'
 import { handOffWindowSettings } from './windowHandoff.js'
 import { tryOutFromSearch } from '../content/marketing/index.js'
 import { DEV_TUNING_PANELS } from '../devFlags.js'
+import { requestTogglePlayback } from '../ui/transportBus.js'
 
 /**
  * "Try it on this clip": the marketing pages' link into the editor
@@ -109,7 +110,7 @@ export function useTryOut() {
       }
       // Let the window mount and engage its preview before the transport starts.
       await nextTick()
-      setTimeout(() => window.dispatchEvent(new CustomEvent('wavely:toggle-play')), 350)
+      setTimeout(requestTogglePlayback, 350)
     } catch (err) {
       console.error('Try-out clip failed:', err)
       fetched = null

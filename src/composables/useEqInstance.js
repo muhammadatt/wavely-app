@@ -7,7 +7,7 @@ import { getEffectChain } from '../audio/effectChain.js'
 import { snapshotLevels } from '../audio/effects/levelTap.js'
 import {
   MAX_BANDS, createBand, applyForfeiture, setBandFrequency, setBandQ,
-  resetBandQ, isBandActive, PARAM_RANGES, clamp, qRangeFor, clampBandToRole,
+  resetBandQ, isBandActive, PARAM_RANGES, clamp, qRangeFor, clampBandToRole, nudgeQ,
 } from '../audio/eqBands.js'
 
 /**
@@ -203,6 +203,12 @@ export function createEqInstance({
       updateBand(id, b => setBandQ(b, q))
     }
 
+    /** One scroll step on a band's Q (see `nudgeQ`); clamped like any Q. */
+    function nudgeBandQ(id, direction) {
+      const band = findBand(id)
+      if (band) setQ(id, nudgeQ(band.q, direction))
+    }
+
     function setType(id, type) {
       updateBand(id, (b) => {
         b.type = type
@@ -272,7 +278,7 @@ export function createEqInstance({
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -290,9 +296,13 @@ export function createEqInstance({
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast(`${label} applied`)
+        return true
       } catch (err) {
         console.error(`${label} failed:`, err)
         showToast(err instanceof DocumentSwitchedError ? err.message : `${label} failed`)
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !eqPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
@@ -330,7 +340,7 @@ export function createEqInstance({
       getSpectrum: () => nodes()?.getSpectrumDb() ?? null,
 
       // bands
-      addBand, removeBand, findBand, setFrequency, setGain, setQ,
+      addBand, removeBand, findBand, setFrequency, setGain, setQ, nudgeBandQ,
       setType, toggleBand, resetQ, clearBands, adoptBands,
       setSolo, setSoloProbe, clearSolo,
 

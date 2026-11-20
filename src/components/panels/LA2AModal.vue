@@ -1,15 +1,13 @@
 <script setup>
-import { computed, onMounted } from 'vue'
-import { useLA2A } from '../../composables/useLA2A.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
+import { computed } from 'vue'
+import { useLA2A, hfEmphDb } from '../../composables/useLA2A.js'
 import { LOOKAHEAD_MAX_MS, LA2A_DEFAULTS } from '../../audio/effects/la2aCompressor.js'
-import { SC_EMPH_MAX_DB, LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../../audio/la2aProcessor.js'
+import { LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../../audio/la2aProcessor.js'
 import { INPUT_TRIM_MAX_DB } from '../../audio/dsp/inputAlign.js'
 import { la2aSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { OPTO_SMOOTH_PRESET_PLUGIN } from '../../audio/pluginPresets/index.js'
 import PresetMenu from './PresetMenu.vue'
-import { useEditorState } from '../../composables/useEditorState.js'
 import HardwareKnob from '../hardware/HardwareKnob.vue'
 import HardwareSlideSwitch from '../hardware/HardwareSlideSwitch.vue'
 import LampButton from '../hardware/LampButton.vue'
@@ -19,19 +17,20 @@ import { engraving, evenAngles, formatSignedDb } from '../hardware/hardwareDial.
 import FloatingWindow from './FloatingWindow.vue'
 import LA2ATuningPanel from './LA2ATuningPanel.vue'
 import { isLA2ATuningVisible } from '../../audio/effects/la2aTuning.js'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const pluginApi = useLA2A()
 const {
-  la2aMode, la2aPeakReduction, la2aGain, la2aR37, la2aLookahead,
+  la2aMode, la2aPeakReduction, la2aGain, la2aHfEmph, syncHfEmph, la2aLookahead,
   la2aAutoMakeup, toggleAutoMakeup: toggleAuto,
-  la2aAnalog, syncAnalog, la2aMix, syncMix,
+  la2aAnalog, toggleAnalog, la2aMix, syncMix,
   la2aPreview, la2aReduction,
   togglePreview, syncMode, syncPeakReduction, syncGain,
-  syncR37, syncLookahead, toggleAutoMakeup, 
+  syncLookahead, toggleAutoMakeup,
   refreshKernelTuning,
-  la2aInputAuto, la2aInputDb, syncInput, resetInputAuto,
+  la2aInputAuto, la2aInputDb, syncInput, setInputAuto,
   apply, teardown, closeModal,
 } = pluginApi
 
@@ -41,13 +40,14 @@ const {
  */
 const showTuningBench = isLA2ATuningVisible()
 
-const { state } = useEditorState()
-
-// Default to engaged when the panel opens
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!la2aPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: la2aPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
 // The window chrome keeps OptoSmooth's amber; the faceplate is the Vintage 2A
@@ -85,20 +85,10 @@ const MODE_OPTIONS = [
   { value: 'limit', label: 'Limit', title: 'Limit — a harder ceiling' },
 ]
 
-/**
- * HF EMPH IS R37, the side-chain trimmer, turned the way the face reads: FLAT
- * fully anticlockwise (R37 100, factory) to full emphasis fully clockwise
- * (R37 0). It filters the SIDE-CHAIN, not the audio — the compressor stops
- * reacting to plosives and rides the presence band instead. Nothing here is
- * audible on its own; it changes what the compressor listens to.
- *
- * The readout is the shelf's real gain above its corner, from the kernel's own
- * constant: `SC_EMPH_MAX_DB * (1 - r37/100)`.
- */
-const hfEmph = computed(() => 100 - la2aR37.value)
-const setHfEmph = (v) => syncR37(100 - v)
+// HF EMPH (R37, turned the way the face reads) and its readout: the shelf's
+// real gain above its corner, from the kernel's constant (useLA2A.js).
 const formatEmph = (v) => {
-  const db = SC_EMPH_MAX_DB * v / 100
+  const db = hfEmphDb(v)
   return db < 0.05 ? 'Flat' : `+${db.toFixed(1)} dB`
 }
 
@@ -121,41 +111,16 @@ const formatPercent = (v) => `${Math.round(v * 100)}%`
  * are bit-identical as DSP; the difference is what the numbers MEAN. Peak
  * Reduction is a patch value presets save, this is a property of the FILE. It
  * folds away on the face (FoldedLcd); AUTO measures it, stepping takes over,
- * exactly as the Gain knob behaves under Auto Makeup.
+ * exactly as the Gain knob behaves under Auto Makeup (`setInputAuto`).
  */
-function setInputAuto(on) {
-  if (on) resetInputAuto()
-  else syncInput(la2aInputDb.value)
-}
 
 /**
  * The lamp beside the nameplate is HARMONICS (analog mode), not power: power
  * is the header's switch. Off is not a bypass — the detector, taper, R37 and
  * ballistics are untouched and gain reduction is bit-identical, so what goes
  * is the colour and not the compression. An LA-2A has no saturation control,
- * and this is still not one: not "how much" but "whether".
+ * and this is still not one: not "how much" but "whether" (`toggleAnalog`).
  */
-const toggleHarmonics = () => syncAnalog(!la2aAnalog.value)
-
-// Preview is just transport playback: the worklet is already in the chain, so
-// what makes this effect "live" is that the audio is running while you turn the
-// knobs. Reuses the existing toggle-play bus rather than a second play path.
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-// The shell removes itself from the window manager; this only has to stop the
-// preview chain and the meter loop.
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  // apply() already disables the preview, but the meter loop is still running.
-  teardown()
-  closeModal()
-}
 
 /**
  * Presets. Read and write live in pluginSettings.js (shared with saved plugin
@@ -177,7 +142,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
     :engaged="la2aPreview"
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!la2aPreview"
     apply-disabled-hint="Turn LA Vintage 2A on to apply it"
@@ -239,7 +204,7 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
                   :title="la2aAnalog
                     ? 'Harmonics on: the valve and cell colour. Click for clean — the compression is identical.'
                     : 'Harmonics off: clean, same compression. Click to bring the colour back.'"
-                  @click="toggleHarmonics"
+                  @click="toggleAnalog"
                 />
                 <div class="v2a-model">Vintage 2A</div>
               </div>
@@ -333,13 +298,13 @@ const presets = usePluginPresets(OPTO_SMOOTH_PRESET_PLUGIN, la2aSettings(pluginA
               <HardwareKnob
                 class="v2a-ctl v2a-knob-sm"
                 variant="bakelite-sm"
-                :model-value="hfEmph"
-                @update:model-value="setHfEmph"
+                :model-value="la2aHfEmph"
+                @update:model-value="syncHfEmph"
                 :min="0" :max="100" :step="1"
                 :default-value="0"
                 mark-style="line" :dots="SMALL_TICKS" :labels="EMPH_LABELS"
                 rotate-labels
-                :tip="formatEmph(hfEmph)"
+                :tip="formatEmph(la2aHfEmph)"
                 label="HF emphasis (R37)" :format-value="formatEmph"
                 :disabled="off"
               />

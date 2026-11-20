@@ -113,5 +113,8 @@ export function pluginCopies(define) {
     return entry.use
   }
 
+  /** The copies built so far ('solo', 'chain-<n>'), without building any. */
+  get.built = () => [...copies.keys()]
+
   return get
 }

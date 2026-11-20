@@ -5,7 +5,7 @@ import FilterShapePicker from './FilterShapePicker.vue'
 import ModulaKnob from '../../modula/ModulaKnob.vue'
 import ModulaChip from '../../modula/ModulaChip.vue'
 import {
-  PARAM_RANGES, qRangeFor, shapesForBand, quantizeQ,
+  PARAM_RANGES, qRangeFor, shapesForBand, quantizeQ, hasGainTerm,
 } from '../../../audio/eqBands.js'
 
 /**
@@ -89,9 +89,7 @@ onBeforeUnmount(() => {
 // ── Plot interaction ──────────────────────────────────────────────────────
 
 function onCreate({ frequencyHz, gainDb, adopt }) {
-  const band = props.eq.addBand({
-    frequencyHz, gainDb, q: 1, type: 'peaking', origin: 'manual_general',
-  })
+  const band = props.eq.addBandAt({ frequencyHz, gainDb })
   // Hand the id straight back so the press that made it can go on to drag it.
   adopt?.(band?.id)
 }
@@ -102,10 +100,7 @@ function onMove({ id, frequencyHz, gainDb }) {
 }
 
 function onQ({ id, delta }) {
-  const band = props.eq.findBand(id)
-  if (!band) return
-  // Multiplicative, so the step feels the same at Q 0.5 and Q 8.
-  props.eq.setQ(id, band.q * (delta > 0 ? 1.15 : 1 / 1.15))
+  props.eq.nudgeBandQ(id, delta)
 }
 
 // ── Formatting ────────────────────────────────────────────────────────────
@@ -162,7 +157,7 @@ function qRangeForBand(band) {
  * full one wants a bell at high Q, which is the neighbouring option.
  */
 function gainInert(band) {
-  return band.type === 'highpass' || band.type === 'lowpass' || band.type === 'notch'
+  return !hasGainTerm(band.type)
 }
 
 function gainLabel(band) {

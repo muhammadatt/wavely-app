@@ -1,5 +1,5 @@
-import { ref, watch } from 'vue'
-import { LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../audio/la2aProcessor.js'
+import { computed, ref, watch } from 'vue'
+import { SC_EMPH_MAX_DB, LA2A_GAIN_MIN_DB, LA2A_GAIN_MAX_DB } from '../audio/la2aProcessor.js'
 import { la2aTuningOverrides } from '../audio/effects/la2aTuning.js'
 import { createMeasureThrottle } from './measureThrottle.js'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
@@ -395,6 +395,12 @@ const copies = pluginCopies((copy, life) => {
        *
        * Keyed on the DOCUMENT, not the revision, so editing the file the user
        * trimmed by hand leaves their setting alone.
+       *
+       * ⚠ A TAB SWITCH NO LONGER REACHES THIS RESET. Per-file settings
+       * (perFilePluginSettings.js) write the entered file's own trim — or,
+       * for a file with nothing saved, re-dial the last-used one — before
+       * this runs, which binds it to the new document. What is left here is
+       * the fallback for any other path onto a different document.
        */
       const sameDoc = alignedFor !== null
         && alignedFor.split(':')[0] === String(appState.activeDocumentId)
@@ -554,6 +560,25 @@ const copies = pluginCopies((copy, life) => {
      * tracker's extrema are stale.
      */
     const syncAnalog = (v) => syncCompressionParam('analog', la2aAnalog, v !== false)
+    /** HARMONICS (analog mode) on / off — colour, never the compression. */
+    const toggleAnalog = () => syncAnalog(!la2aAnalog.value)
+
+    /**
+     * HF EMPH is R37, the side-chain trimmer, turned the way the face reads:
+     * 0 = FLAT (R37 100, factory) to 100 = full emphasis (R37 0). It filters
+     * the SIDE-CHAIN, not the audio.
+     */
+    const la2aHfEmph = computed(() => 100 - la2aR37.value)
+    const syncHfEmph = (v) => syncR37(100 - v)
+
+    /**
+     * AUTO on: the measurement owns the INPUT trim again. AUTO off: the trim
+     * keeps the value AUTO had reached, now held by hand.
+     */
+    function setInputAuto(on) {
+      if (on) resetInputAuto()
+      else syncInput(la2aInputDb.value)
+    }
 
     /**
      * Touch-to-take-over: dragging the knob while AUTO is on switches AUTO off
@@ -636,7 +661,7 @@ const copies = pluginCopies((copy, life) => {
     }
 
     async function apply() {
-      if (!state.selection) return
+      if (!state.selection) return false
       const { start, end } = state.selection
       // Pinned to the document Apply was pressed on: tabs stay usable while it
       // renders, and `state` follows the active one (pinActiveDocument).
@@ -672,9 +697,13 @@ const copies = pluginCopies((copy, life) => {
         const cache = await computePeakCache(buffer, 256)
         setPeakCache(bufferId, cache)
         showToast('LA-2A compression applied')
+        return true
       } catch (err) {
         console.error('LA-2A failed:', err)
         showToast(err instanceof DocumentSwitchedError ? err.message : 'LA-2A compression failed')
+        // The window stays open on a failure: hand back the preview it had.
+        if (wasPreviewing && !la2aPreview.value) togglePreview()
+        return false
       } finally {
         endProcessing(pin.docId)
       }
@@ -752,6 +781,10 @@ const copies = pluginCopies((copy, life) => {
       syncR37,
       syncLookahead,
       syncAnalog,
+      toggleAnalog,
+      la2aHfEmph,
+      syncHfEmph,
+      setInputAuto,
       syncMix,
       toggleAutoMakeup,
       syncInput,
@@ -772,4 +805,12 @@ const copies = pluginCopies((copy, life) => {
 /** The copy the calling window edits (the solo copy outside a plugin window), or `copy` when named. */
 export function useLA2A(copy) {
   return copies(copy)()
+}
+
+/** The copies of this plugin built so far, without building any (see perFilePluginSettings.js). */
+useLA2A.builtCopies = () => copies.built()
+
+/** The side-chain shelf's gain above its corner at an HF EMPH position (0–100), dB. */
+export function hfEmphDb(emph) {
+  return SC_EMPH_MAX_DB * emph / 100
 }

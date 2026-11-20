@@ -24,67 +24,55 @@
  * "when" lives; the strip only says "where and how far".
  * DELTA sits in the header and never reaches the apply path.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useDeEsser } from '../../composables/useDeEsser.js'
-import { currentPluginCopy } from '../../composables/pluginCopies.js'
-import { useEditorState } from '../../composables/useEditorState.js'
 import {
   AIR_MAKEUP_MAX_DB,
   DETECT_HZ_MIN, DETECT_HZ_MAX, DETECT_HI_MIN, DETECT_HI_MAX, DETECT_MIN_RATIO,
 } from '../../audio/deEsserProcessor.js'
-import { guardToFloorDb, amountSplitOf, DE_ESSER_DEFAULTS } from '../../audio/deEsserParams.js'
-import { softenLaw, SOFTEN_MAX } from '../../audio/deEsserSoftenStage.js'
+import { DE_ESSER_DEFAULTS, DE_ESSER_AMOUNT_DEFAULT as AMOUNT_DEFAULT, DE_ESSER_SPLIT_DEFAULT as SPLIT_DEFAULT } from '../../audio/deEsserParams.js'
+import { SOFTEN_MAX } from '../../audio/deEsserSoftenStage.js'
 import ModulaKnob from '../modula/ModulaKnob.vue'
 import ModulaFillSlider from '../modula/ModulaFillSlider.vue'
 import LevelMeter from '../meters/LevelMeter.vue'
-import { createPeakHold, useMeterFrame } from '../meters/ballistics.js'
 import DeEsserScope from '../meters/DeEsserScope.vue'
 import DeEsserBandStrip from './DeEsserBandStrip.vue'
 import { deEsserSettings } from '../../composables/pluginSettings.js'
 import { usePluginPresets } from '../../composables/usePluginPresets.js'
 import { DE_ESSER_PRESET_PLUGIN } from '../../audio/pluginPresets/deEsser.js'
 import { HF_SCOPE_SECONDS } from '../../audio/deEsserScope.js'
-import { readTimelineEnvelope } from '../../audio/timelineEnvelope.js'
 import FloatingWindow from './FloatingWindow.vue'
+import { usePluginWindow } from '../../composables/usePluginWindow.js'
+import { useTimelineEnvelope, useScopeTransportHold, useHeldReadings } from '../../composables/useScopeFeeds.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
 const pluginApi = useDeEsser()
 const {
-  hfAmount, hfSplit, hfTotal, hfGuard, hfBand, hfResoAmount, hfSoften, hfSoftenCut, hfAir, hfAirLossDb, hfComp, hfDetect, hfDetectHigh, hfAudition, hfDuck, hfBroadband, hfDelta, hfPreview,
+  hfAmount, hfSplit, hfTotal, hfGuard, hfBand, hfSoften, hfSoftenCut, hfAir, hfAirLossDb, hfComp, hfDetect, hfDetectHigh, hfAudition, hfDuck, hfBroadband, hfDelta, hfPreview,
   hfLevelOffset, refreshLevel,
-  hfReduction, hfOutputLevels,
+  hfReduction, hfOutputLevels, hfTotalReduction, hfSoftenDepthDb,
   togglePreview, syncSoften, syncAir, syncComp, syncDetect, syncDetectHigh, scheduleAutoAir, syncTotal, syncSplit, syncGuard, applyParams, toggleDelta, toggleAudition,
-  hfReso, hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
+  hfAirLamp, getScope, holdScope, clearScope, getInputSpectrum,
   apply, teardown, closeModal,
 } = pluginApi
-
-const { state, appState } = useEditorState()
 
 const presets = usePluginPresets(DE_ESSER_PRESET_PLUGIN, deEsserSettings(pluginApi))
 const D = DE_ESSER_DEFAULTS
 
-onMounted(() => {
-  // The chain's copy keeps its ON/BYPASS: opening its editor from the chain
-  // must not un-bypass its slot.
-  if (!hfPreview.value && currentPluginCopy() === 'solo') togglePreview()
+// Engage on open, Preview = Play / Stop, close and apply-then-close: the
+// shared plugin-window behaviour (usePluginWindow.js).
+const { isPlaying, togglePlayback, close, applyAndClose } = usePluginWindow({
+  engaged: hfPreview,
+  toggle: togglePreview,
+  apply,
+  teardown,
+  closeModal,
 })
 
-// The scope freezes on what last played while the transport is stopped, and
-// starts over if playback resumes somewhere else (a seek, a click on the
-// timeline): its history would describe audio that is no longer behind the
-// playhead.
-let stoppedAt = null
-watch(() => [state.isPlaying, hfPreview.value], ([playing]) => {
-  if (playing) {
-    if (stoppedAt !== null && Math.abs(state.playhead - stoppedAt) > 0.25) clearScope()
-    stoppedAt = null
-    holdScope(false)
-  } else {
-    stoppedAt = state.playhead
-    holdScope(true)
-  }
-}, { immediate: true })
+// The scope freezes while the transport is stopped and starts over if
+// playback resumes elsewhere (useScopeFeeds.js).
+useScopeTransportHold({ engaged: hfPreview, holdScope, clearScope })
 
 // The kit's amber. LISTEN takes the kit's second hue (a "where", not an amount).
 const ACCENT = '#e8a33d'
@@ -102,25 +90,13 @@ function lampStyle(level, colour) {
   }
 }
 
-/**
- * The timeline's peak envelope around the playhead, for the scope's lookahead
- * (and its history when the effect is bypassed). One scratch per side: both
- * are read in the same frame. See ClipperScope / SoftClipperModal.
- */
-const envelopeScratch = { ahead: null, behind: null }
-function envelope(offsetSeconds, seconds, columns) {
-  if (!state.segments?.length) return null
-  const side = offsetSeconds < 0 ? 'behind' : 'ahead'
-  if (envelopeScratch[side]?.length !== columns) envelopeScratch[side] = new Float32Array(columns)
-  return readTimelineEnvelope(state.segments, state.playhead + offsetSeconds, seconds, columns, envelopeScratch[side])
-}
+/** The timeline's peak envelope around the playhead, for the scope (useScopeFeeds.js). */
+const envelope = useTimelineEnvelope()
 
 // The Amount and its Split are a view over the two stages (useDeEsser): what
 // each stage actually got, as a note under the knob.
 const stageNote = computed(() => `WIDE ${Math.round(hfDuck.value)} · SPLIT ${Math.round(hfAmount.value)}`)
 const formatSplit = v => (v <= 0 ? 'ALL WIDE' : v >= 100 ? 'ALL SPLIT' : `${100 - Math.round(v)} / ${Math.round(v)}`)
-const AMOUNT_DEFAULT = amountSplitOf(D.duck, D.amount).total
-const SPLIT_DEFAULT = amountSplitOf(D.duck, D.amount).split
 
 // ── Detector strip ──────────────────────────────────────────────────────────
 // The strip's axis starts at 500 Hz, not 100: the two handles live between
@@ -134,8 +110,6 @@ const F_MIN = 500
 const F_MAX = 20000
 const GRID_FREQS = [1000, 2000, 3000, 4000, 6000, 8000, 12000, 16000]
 
-const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (hfResoAmount.value > 0 ? hfReso.value : 0) + (hfSoften.value > 0 ? hfSoftenCut.value : 0))
-
 /**
  * THE READOUT IS HELD, NOT LIVE. Read raw, each figure changed every frame —
  * an "s" is 30–40 ms, so a number was on screen for one or two frames before
@@ -143,30 +117,18 @@ const totalReduction = computed(() => hfReduction.value + hfBroadband.value + (h
  * then falls at 6 dB/s, and the text refreshes at most 5 times a second, so
  * what is printed is "the most it took just now" and stays long enough to read.
  */
-const READOUT_HOLD = { holdMs: 1000, fallPerSec: 6 }
-const READOUT_EVERY_MS = 200
-const readoutHolds = { total: createPeakHold(READOUT_HOLD), duck: createPeakHold(READOUT_HOLD), eq: createPeakHold(READOUT_HOLD), soft: createPeakHold(READOUT_HOLD) }
-const shown = ref({ total: 0, duck: 0, eq: 0, soft: 0 })
+const shown = useHeldReadings({
+  total: () => hfTotalReduction.value,
+  duck: () => hfBroadband.value,
+  eq: () => hfReduction.value,
+  soft: () => hfSoftenCut.value,
+}, { holdMs: 1000, fallPerSec: 6, everyMs: 200 })
 // The de-ess lamp: lit by either stage's cut, held a moment so a 30 ms "s" is seen
 // (the cut itself reads once or twice a frame). Full at 3 dB.
-const deessHold = createPeakHold({ holdMs: 120, fallPerSec: 20 })
-const deessLamp = ref(0)
-let sinceReadout = 0
-useMeterFrame((dt) => {
-  deessLamp.value = Math.round(Math.min(1, deessHold.push(Math.max(hfBroadband.value, hfReduction.value), dt) / 3) * 20) / 20
-  const h = readoutHolds
-  const next = {
-    total: h.total.push(totalReduction.value, dt),
-    duck: h.duck.push(hfBroadband.value, dt),
-    eq: h.eq.push(hfReduction.value, dt),
-    soft: h.soft.push(hfSoftenCut.value, dt),
-  }
-  sinceReadout += dt
-  if (sinceReadout >= READOUT_EVERY_MS) {
-    sinceReadout = 0
-    shown.value = next
-  }
-})
+const lampHeld = useHeldReadings({
+  cut: () => Math.max(hfBroadband.value, hfReduction.value),
+}, { holdMs: 120, fallPerSec: 20 })
+const deessLamp = computed(() => Math.round(Math.min(1, lampHeld.value.cut / 3) * 20) / 20)
 const formatSoften = v => (v <= 0 ? 'OFF' : v.toFixed(1))
 // AUTO: the knob is the measurement, so say what it measured; manual says so.
 const airCaption = computed(() => (hfComp.value
@@ -174,7 +136,7 @@ const airCaption = computed(() => (hfComp.value
   : 'manual'))
 // What the Soften knob currently allows on one attack.
 const softenCaption = computed(() => {
-  const d = softenLaw(hfSoften.value).depthDb
+  const d = hfSoftenDepthDb.value
   return d > 0 ? `onsets · up to −${Math.round(d)} dB` : 'off'
 })
 
@@ -193,25 +155,6 @@ function formatPct(v) {
 function formatGuard(v) {
   return v > 0 ? `${Math.round(v)}%` : 'OFF'
 }
-
-const guardLabel = computed(() =>
-  hfGuard.value > 0 ? `floor ${guardToFloorDb(hfGuard.value).toFixed(0)} dB` : 'no guard',
-)
-
-function togglePlayback() {
-  window.dispatchEvent(new CustomEvent('wavely:toggle-play'))
-}
-
-function close() {
-  teardown()
-}
-
-async function applyAndClose() {
-  await apply()
-  teardown()
-  closeModal()
-}
-
 </script>
 
 <template>
@@ -232,7 +175,7 @@ async function applyAndClose() {
     delta-title="Hear only what is being removed — it should sound like sibilance and nothing else. Monitoring only; Apply always renders the processed audio."
     show-preview
     previewable
-    :previewing="state.isPlaying"
+    :previewing="isPlaying"
     show-apply
     :apply-disabled="!hfPreview"
     apply-disabled-hint="Turn De-Esser on to apply it"
@@ -367,7 +310,7 @@ async function applyAndClose() {
         :envelope-fn="envelope"
         :window-seconds="HF_SCOPE_SECONDS * 2"
         :accent="ACCENT"
-        :held="!state.isPlaying"
+        :held="!isPlaying"
         :height="124"
         title="De-Esser activity: the waveform, shaded wherever it de-essed — playhead at the centre, played audio to its left, audio about to play to its right"
         @request-play="togglePlayback"

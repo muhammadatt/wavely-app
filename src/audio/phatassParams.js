@@ -338,9 +338,9 @@ function clamp(v, lo, hi) {
 /** A record-emphasis time constant's corner, Hz. */
 const emphasisHz = us => 1 / (2 * Math.PI * us * 1e-6)
 export const TAPE_SPEEDS = Object.freeze({
-  ips30: Object.freeze({ label: '30', headBump: 'a800-30', detectHz: emphasisHz(17.5), cornerMaxHz: 14000, cornerMinHz: 6000, thresholdRelDb: -4, rangeDb: 4 }),
-  ips15: Object.freeze({ label: '15', headBump: 'a800-15', detectHz: emphasisHz(35), cornerMaxHz: 10000, cornerMinHz: 4000, thresholdRelDb: -6, rangeDb: 6 }),
-  ips7: Object.freeze({ label: '7.5', headBump: 'a800-7', detectHz: emphasisHz(70), cornerMaxHz: 7000, cornerMinHz: 2500, thresholdRelDb: -6, rangeDb: 9 }),
+  ips30: Object.freeze({ label: '30', reelSeconds: 1.6, headBump: 'a800-30', detectHz: emphasisHz(17.5), cornerMaxHz: 14000, cornerMinHz: 6000, thresholdRelDb: -4, rangeDb: 4 }),
+  ips15: Object.freeze({ label: '15', reelSeconds: 3.2, headBump: 'a800-15', detectHz: emphasisHz(35), cornerMaxHz: 10000, cornerMinHz: 4000, thresholdRelDb: -6, rangeDb: 6 }),
+  ips7: Object.freeze({ label: '7.5', reelSeconds: 6.4, headBump: 'a800-7', detectHz: emphasisHz(70), cornerMaxHz: 7000, cornerMinHz: 2500, thresholdRelDb: -6, rangeDb: 9 }),
 })
 /** Shared by every speed: law and timing (reasoned). */
 export const TAPE_HF_LAW = Object.freeze({

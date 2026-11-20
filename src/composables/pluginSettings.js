@@ -3,10 +3,12 @@
  * composable — so a copy's settings can be captured and restored with its
  * window closed. A saved Plugin Chain (useChainPresets.js) is a list of these.
  *
- * Each entry is `{ use, io, presetPlugin?, chainKeys? }`:
+ * Each entry is `{ use, io, fileIo?, presetPlugin?, chainKeys? }`:
  *   use(copy)    the composable of that copy ('solo' or 'chain-<n>'), built if needed
  *   io(api)      `{ read, write }` over it — `read()` a plain object, `write(p)` puts
  *                one into effect through the plugin's own sync functions
+ *   fileIo       `{ read, write }` of hand-set FILE values (see la2aFileSettings): kept
+ *                per file, never in a preset or a saved chain
  *   presetPlugin the plugin's preset collection, if it has one. Its whitelist and
  *                `normalize` then guard what a saved chain restores, exactly as
  *                they guard a preset.
@@ -291,9 +293,41 @@ export function saturationBenchSettings(api) {
 }
 
 /** Keyed by the plugin's registry id (its solo window id). */
+/**
+ * FILE SETTINGS: hand-set values that describe the recording rather than the
+ * patch, so presets and saved chains never carry them — but the file's own
+ * per-file settings do (perFilePluginSettings.js; owner, November 2026: a
+ * manual pre-gain is a setting like any other). Today that is the compressors'
+ * INPUT trim, read only while the user owns it: under AUTO the value is a
+ * measurement, re-taken on every file, and stored as `{ inputAuto: true }`.
+ */
+export function la2aFileSettings(api) {
+  return {
+    read: () => (api.la2aInputAuto.value
+      ? { inputAuto: true }
+      : { inputAuto: false, inputDb: api.la2aInputDb.value }),
+    write: (p) => {
+      if (p?.inputAuto === false && Number.isFinite(p.inputDb)) api.syncInput(p.inputDb)
+      else if (!api.la2aInputAuto.value) api.resetInputAuto()
+    },
+  }
+}
+
+export function fet1176FileSettings(api) {
+  return {
+    read: () => (api.fetInputAuto.value
+      ? { inputAuto: true }
+      : { inputAuto: false, inputDb: api.fetInputAlignDb.value }),
+    write: (p) => {
+      if (p?.inputAuto === false && Number.isFinite(p.inputDb)) api.syncInputAlign(p.inputDb)
+      else if (!api.fetInputAuto.value) api.enableInputAuto()
+    },
+  }
+}
+
 export const PLUGIN_SETTINGS = {
-  'opto-smooth': { use: useLA2A, io: la2aSettings, presetPlugin: OPTO_SMOOTH_PRESET_PLUGIN },
-  'fet-punch': { use: useFET1176, io: fet1176Settings, presetPlugin: FET_PUNCH_PRESET_PLUGIN },
+  'opto-smooth': { use: useLA2A, io: la2aSettings, fileIo: la2aFileSettings, presetPlugin: OPTO_SMOOTH_PRESET_PLUGIN },
+  'fet-punch': { use: useFET1176, io: fet1176Settings, fileIo: fet1176FileSettings, presetPlugin: FET_PUNCH_PRESET_PLUGIN },
   'resonance-suppressor': { use: useResonance, io: resonanceSettings, presetPlugin: RESO_TAME_PRESET_PLUGIN },
   'inflator': { use: useInflator, io: inflatorSettings, presetPlugin: INFLATOR_PRESET_PLUGIN },
   'phatass': { use: usePhatass, io: phatassSettings, presetPlugin: PHATASS_PRESET_PLUGIN },
