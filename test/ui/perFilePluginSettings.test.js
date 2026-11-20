@@ -134,3 +134,58 @@ test('a file closed while another is active is forgotten without a tab switch', 
   appState.documents.splice(0)
   await nextTick()
 })
+
+test('Loudness / Peak Normalize, Auto Leveler and Noise Reduction keep their settings per file too', () => {
+  per.resetPerFilePluginSettings()
+  const w = per.WINDOW_SETTINGS
+  const set = (id, patch) => w[id].write({ ...w[id].read(), ...patch })
+  set('loudness', { targetDb: -20, unit: 'RMS', ceilingDb: -3 })
+  set('normalize', { targetPeak: -2 })
+  set('auto-leveler', { deadband_db: 1.5 })
+  set('noise-reduction', { engine: 'rnnoise', mix: 0.6 })
+  per.onActiveDocumentChanged('B', 'A', ['A', 'B'])
+  assert.equal(w.loudness.read().unit, 'RMS', 'B inherits the last used')
+  set('loudness', { targetDb: -16, unit: 'LUFS', ceilingDb: -1 })
+  set('normalize', { targetPeak: -0.5 })
+  set('auto-leveler', { deadband_db: 0.5 })
+  set('noise-reduction', { engine: 'df3', mix: 1 })
+  per.onActiveDocumentChanged('A', 'B', ['A', 'B'])
+  assert.deepEqual(
+    [w.loudness.read().targetDb, w.loudness.read().unit, w.normalize.read().targetPeak,
+      w['auto-leveler'].read().deadband_db, w['noise-reduction'].read().engine, w['noise-reduction'].read().mix],
+    [-20, 'RMS', -2, 1.5, 'rnnoise', 0.6], 'A gets its own back')
+  per.onActiveDocumentChanged('B', 'A', ['A', 'B'])
+  assert.deepEqual([w.loudness.read().unit, w.normalize.read().targetPeak], ['LUFS', -0.5], 'and B its own')
+})
+
+test('a restore only writes what each window knows how to hold', () => {
+  const w = per.WINDOW_SETTINGS
+  const before = w['auto-leveler'].read()
+  w['auto-leveler'].write({ deadband_db: 'loud', bogus: 1 })
+  assert.deepEqual(w['auto-leveler'].read(), before)
+  w['noise-reduction'].write({ engine: null })
+  assert.equal(w['noise-reduction'].read().engine, null, 'both passes off is a real state')
+  w['noise-reduction'].write({ engine: 'df3' })
+  const loud = w.loudness.read()
+  w.loudness.write({ unit: 'dB', peakMode: 'maybe', chosenId: 'nope' })
+  assert.deepEqual(w.loudness.read(), loud)
+})
+
+test('Auto Leveler\'s Last Run belongs to the file it ran on', async () => {
+  const { useAutoLevel, recordAutoLevelResult, forgetAutoLevelResults } = await import('../../src/composables/useAutoLevel.js')
+  const { appState } = useEditorState()
+  const { lastResult, lastRunSummary } = useAutoLevel()
+  // Open files: a record for a file not in the list is pruned on the switch.
+  appState.documents.push({ id: 'run-a' }, { id: 'run-b' })
+  appState.activeDocumentId = 'run-a'
+  recordAutoLevelResult('run-a', { reason: 'insufficient_clips' })
+  assert.equal(lastRunSummary.value.declined, 'Only one phrase found — nothing to level against.')
+  appState.activeDocumentId = 'run-b'
+  assert.equal(lastResult.value, null, 'another file shows no run')
+  appState.activeDocumentId = 'run-a'
+  assert.deepEqual(lastResult.value, { reason: 'insufficient_clips' }, 'back on the file it ran on')
+  forgetAutoLevelResults(['run-b'])
+  assert.equal(lastResult.value, null, 'closed with its file')
+  appState.activeDocumentId = null
+  appState.documents.splice(0)
+})

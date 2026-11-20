@@ -16,6 +16,39 @@ export const formatDb = v => (Number.isFinite(v) ? v.toFixed(1) : '—')
 export const LOUDNESS_INITIAL_TARGET = targetById(DEFAULT_TARGET_ID)
 
 /**
+ * THE SETTINGS OUTLIVE THE WINDOW (November 2026): they are kept per file
+ * (perFilePluginSettings.js), and a file is entered with its window open or
+ * shut. Reopening the window therefore shows the active file's settings — the
+ * last ones it was given, or inherited from the file used before it — rather
+ * than the defaults. The measurement and its watchers keep the window's
+ * lifetime.
+ */
+const targetDb = ref(LOUDNESS_INITIAL_TARGET.targetDb)
+const unit = ref(LOUDNESS_INITIAL_TARGET.unit)
+const ceilingDb = ref(LOUDNESS_INITIAL_TARGET.ceilingDb)
+const peakMode = ref('limit')
+/** The benchmark last clicked: which note to print when several are lit (see `noteTarget`). */
+const chosenId = ref(DEFAULT_TARGET_ID)
+
+const PEAK_MODES = ['limit', 'safe']
+const UNITS = ['LUFS', 'RMS']
+
+/** Loudness Normalize's settings, for per-file save and restore. */
+export const loudnessSettingsIO = {
+  read: () => ({
+    targetDb: targetDb.value, unit: unit.value, ceilingDb: ceilingDb.value,
+    peakMode: peakMode.value, chosenId: chosenId.value,
+  }),
+  write: (p) => {
+    if (Number.isFinite(p?.targetDb)) targetDb.value = p.targetDb
+    if (UNITS.includes(p?.unit)) unit.value = p.unit
+    if (Number.isFinite(p?.ceilingDb)) ceilingDb.value = p.ceilingDb
+    if (PEAK_MODES.includes(p?.peakMode)) peakMode.value = p.peakMode
+    if (typeof p?.chosenId === 'string' && targetById(p.chosenId)) chosenId.value = p.chosenId
+  },
+}
+
+/**
  * Loudness Normalize: measure the region against a delivery target, then move
  * it there and hold a peak ceiling.
  *
@@ -26,18 +59,18 @@ export const LOUDNESS_INITIAL_TARGET = targetById(DEFAULT_TARGET_ID)
  * be pure cost (it is uncapped by design; see `remeasure`).
  */
 export function useLoudnessNormalize() {
-  const { state, totalDuration, showToast } = useEditorState()
-
-  const targetDb = ref(LOUDNESS_INITIAL_TARGET.targetDb)
-  const unit = ref(LOUDNESS_INITIAL_TARGET.unit)
-  const ceilingDb = ref(LOUDNESS_INITIAL_TARGET.ceilingDb)
-  const peakMode = ref('limit')
+  const { state, appState, totalDuration, showToast } = useEditorState()
 
   /** The last measurement of the current region, or null while unknown. */
   const measurement = ref(null)
   const measuring = ref(false)
-  /** What the last Apply actually achieved — measured on the render. */
-  const lastReport = ref(null)
+  /**
+   * What the last Apply actually achieved — measured on the render — per file:
+   * a report describes the file it was rendered on, so another tab shows its
+   * own (or none).
+   */
+  const reports = ref({})
+  const lastReport = computed(() => reports.value[appState.activeDocumentId] ?? null)
 
   /** The region the window works on: the selection, or the whole file. */
   function region() {
@@ -59,8 +92,8 @@ export function useLoudnessNormalize() {
   const activeIds = computed(() => new Set(
     matchingTargets(targetDb.value, unit.value, ceilingDb.value).map(t => t.id)))
 
-  /**
-   * Which benchmark's note to print, when more than one is lit.
+  /*
+   * Which benchmark's note to print, when more than one is lit (`chosenId`).
    *
    * ⚠ THE CLICK IS REMEMBERED ONLY FOR THIS. It is not a selection — the lit
    * buttons come from the values, and turning the knob off them unlights
@@ -68,7 +101,6 @@ export function useLoudnessNormalize() {
    * prints the podcast note rather than Apple Music's, even though both are
    * true of -16 LUFS at -1 dBTP.
    */
-  const chosenId = ref(DEFAULT_TARGET_ID)
 
   const noteTarget = computed(() => {
     const lit = matchingTargets(targetDb.value, unit.value, ceilingDb.value)
@@ -174,6 +206,13 @@ export function useLoudnessNormalize() {
   // A render replaces buffers in the region, so the reading it produced is stale
   // the moment anything else edits the file.
   watch(() => state.revision, scheduleMeasure)
+  // Another file: its own reading, at once. Neither watch above fires when both
+  // files have no selection and the same revision count.
+  watch(() => appState.activeDocumentId, () => {
+    measurement.value = null
+    clearTimeout(measureTimer)
+    remeasure()
+  })
   onScopeDispose(() => {
     disposed = true
     clearTimeout(measureTimer)
@@ -278,11 +317,15 @@ export function useLoudnessNormalize() {
     })
     if (!out) return false
 
-    lastReport.value = {
-      ...out.report,
+    // applyToRegion committed, so the file active now is the one rendered.
+    reports.value = {
+      ...reports.value,
+      [appState.activeDocumentId]: {
+        ...out.report,
       targetDb: applied.targetDb,
       unitLabel: appliedUnit,
-      peakUnitLabel: appliedPeakUnit,
+        peakUnitLabel: appliedPeakUnit,
+      },
     }
     // The region now measures differently — say so with the new numbers rather
     // than leaving the readout describing the file that has just been replaced.

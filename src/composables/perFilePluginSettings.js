@@ -3,6 +3,10 @@ import { useEditorState } from './useEditorState.js'
 import { PLUGIN_SETTINGS, pluginSettingsIO } from './pluginSettings.js'
 import { usePluginChain, chainApplying } from './usePluginChain.js'
 import { baseId, copyOfId } from './pluginCopies.js'
+import { loudnessSettingsIO } from './useLoudnessNormalize.js'
+import { peakNormalizeSettingsIO } from './usePeakNormalize.js'
+import { autoLevelSettingsIO, forgetAutoLevelResults } from './useAutoLevel.js'
+import { noiseReductionSettingsIO } from './useNoiseReduction.js'
 
 /**
  * PER-FILE PLUGIN SETTINGS AND CHAINS.
@@ -43,14 +47,25 @@ import { baseId, copyOfId } from './pluginCopies.js'
  * - A switch during a chain Apply (which the switch cancels) waits for the
  *   Apply to finish unwinding, since the rack refuses edits meanwhile.
  *
- * Not covered: plugins with no settings read/write (Auto Leveler, Noise
- * Reduction, Loudness / Peak Normalize). They keep one set of settings for
- * every file, as before.
+ * The windows that are not plugin copies — Loudness Normalize, Peak Normalize,
+ * Auto Leveler and Noise Reduction (WINDOW_SETTINGS) — are kept per file the
+ * same way, inherited the same way, whether their window is open or not. What
+ * they report about a past Apply (Auto Leveler's Last Run, Loudness's Applied
+ * line) is per file too, kept by the composables themselves.
  */
+
+/** The non-copy windows' settings, by registry id: `{ read, write }` each. */
+export const WINDOW_SETTINGS = {
+  'loudness': loudnessSettingsIO,
+  'normalize': peakNormalizeSettingsIO,
+  'auto-leveler': autoLevelSettingsIO,
+  'noise-reduction': noiseReductionSettingsIO,
+}
 
 /**
  * docId → {
  *   solo: Map(pluginId → { settings, file }),
+ *   windows: Map(windowId → settings)   (WINDOW_SETTINGS),
  *   chain: { bypassed, slots: [{ plugin, active, settings, file }] },
  * }
  */
@@ -122,7 +137,8 @@ export function savePluginSettingsFor(docId) {
     slots: rackSlots().map(s => ({ plugin: s.plugin, active: s.active, ...readCopy(s.plugin, s.copy) })),
   }
   const chain = chainToSave({ docId, owner: rackOwner, live, previous: saved.get(docId)?.chain })
-  saved.set(docId, { solo, chain })
+  const windows = new Map(Object.entries(WINDOW_SETTINGS).map(([id, io]) => [id, plain(io.read())]))
+  saved.set(docId, { solo, chain, windows })
 }
 
 /**
@@ -186,6 +202,10 @@ export function restorePluginSettingsFor(docId) {
     const hit = store.solo.get(pluginId)
     if (hit) writeCopy(pluginId, 'solo', hit)
   }
+  for (const [id, io] of Object.entries(WINDOW_SETTINGS)) {
+    const hit = store.windows?.get(id)
+    if (hit && !same(plain(io.read()), hit)) io.write(plain(hit))
+  }
   if (docId === rackOwner) {
     // Back on the file whose rack is live (a switch away and back during a
     // chain Apply): nothing to put back.
@@ -202,6 +222,7 @@ export function restorePluginSettingsFor(docId) {
 export function forgetClosedDocuments(openIds) {
   const open = new Set(openIds)
   for (const id of saved.keys()) if (!open.has(id)) saved.delete(id)
+  forgetAutoLevelResults(openIds)
 }
 
 /** The files that have settings saved (for tests). */
