@@ -1,7 +1,6 @@
 <script setup>
-import { watch } from 'vue'
+import { defineAsyncComponent, watch } from 'vue'
 import { useEditorState } from './composables/useEditorState.js'
-import EditorScreen from './components/EditorScreen.vue'
 import FilesPanel from './components/FilesPanel.vue'
 import SaveDialog from './components/SaveDialog.vue'
 import ToastNotification from './components/ToastNotification.vue'
@@ -21,6 +20,15 @@ import { useSessionAutosave } from './composables/useSessionAutosave.js'
 import { useServerJobs } from './composables/useServerJobs.js'
 import ServerJobsNotice from './components/ServerJobsNotice.vue'
 import { createWakeLock } from './platform/wakeLock.js'
+import { useFormFactor } from './composables/useFormFactor.js'
+
+// One editor shell per visit: the desktop layout or the phone one, chosen at
+// startup (ui/formFactor.js) unless the user picked one. Each loads on its
+// own, so a phone never downloads the desktop shell and a desktop never
+// downloads the phone one; everything they edit lives outside them.
+const EditorScreen = defineAsyncComponent(() => import('./components/EditorScreen.vue'))
+const MobileEditorScreen = defineAsyncComponent(() => import('./components/mobile/MobileEditorScreen.vue'))
+const { layout } = useFormFactor()
 
 // ProcessingOverlay is no longer mounted here — it now renders inside the
 // waveform area so a job on one document doesn't block the whole app.
@@ -86,7 +94,10 @@ useBilling().start().then(result => {
 <template>
   <!-- Kept mounted under the account dashboard (documents live in memory),
        but inert: nothing behind it takes focus or clicks. -->
-  <EditorScreen :inert="accountScreen.state.open || undefined" />
+  <component
+    :is="layout === 'mobile' ? MobileEditorScreen : EditorScreen"
+    :inert="accountScreen.state.open || undefined"
+  />
   <FilesPanel v-if="appState.filesPanelOpen" />
   <SaveDialog v-if="appState.saveDialog" :key="appState.saveDialog.docId" />
   <WindowLayer />

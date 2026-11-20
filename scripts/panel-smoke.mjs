@@ -583,7 +583,13 @@ try {
       viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2,
     })
     const pp = await phone.newPage()
-    await pp.addInitScript(() => { window.showOpenFilePicker = undefined })
+    // The DESKTOP layout on a phone: a touch phone now opens the mobile shell
+    // (checked below), and this pass keeps covering what "Use desktop layout"
+    // leaves a phone user with.
+    await pp.addInitScript(() => {
+      window.showOpenFilePicker = undefined
+      localStorage.setItem('wavely:layout', 'desktop')
+    })
     pp.on('pageerror', e => errors.push(`PAGEERROR (phone) ${e.message}`))
     const why = []
     try {
@@ -687,6 +693,112 @@ try {
     const ok = why.length === 0 && fresh.length === 0
     if (!ok) failures++
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Phone (touch)'.padEnd(16)} ${why.join('')}${fresh.join(' | ')}`)
+  }
+
+  /*
+   * The MOBILE SHELL (components/mobile/), which a touch phone gets by default:
+   * the header's file switcher, a touch selection driving the action bar, Cut
+   * through it, a category sheet, the Plugin Chain as a sheet with Apply on
+   * screen, Play, the long-press menu, and "Use desktop layout".
+   */
+  {
+    const before = errors.length
+    const phone = await browser.newContext({
+      viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 },
+      hasTouch: true, isMobile: true, deviceScaleFactor: 2,
+    })
+    const pp = await phone.newPage()
+    await pp.addInitScript(() => { window.showOpenFilePicker = undefined })
+    pp.on('pageerror', e => errors.push(`PAGEERROR (mobile) ${e.message}`))
+    const why = []
+    try {
+      await pp.goto(URL_, { waitUntil: 'networkidle' })
+      if (!(await pp.locator('[data-testid=mobile-shell]').count())) why.push('a touch phone did not get the mobile shell; ')
+      const chooserP = pp.waitForEvent('filechooser')
+      await pp.getByText('Choose audio files').click()
+      await (await chooserP).setFiles(wav)
+      await pp.waitForTimeout(3000)
+      if (!/WAV/.test(await pp.locator('[data-testid=mobile-file-switcher]').innerText())) why.push('the header does not show the file; ')
+
+      const cdp = await phone.newCDPSession(pp)
+      const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', {
+        type, touchPoints: pts.map(([x, y], id) => ({ x, y, id })),
+      })
+      const box = await pp.locator('canvas.waveform-canvas').boundingBox()
+      const y = box.y + box.height / 2
+      const at = f => box.x + box.width * f
+      const length = () => pp.evaluate(async () =>
+        (await import('/src/composables/useEditorState.js')).useEditorState().totalDuration.value)
+
+      // A touch drag selects, and the action bar shows it.
+      await touch('touchStart', [[at(0.2), y]])
+      for (let f = 0.25; f <= 0.5; f += 0.05) { await touch('touchMove', [[at(f), y]]); await pp.waitForTimeout(16) }
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(300)
+      const bar = pp.locator('[data-testid=mobile-selection-bar]')
+      if (!/\d:\d\d\.\d\d – \d:\d\d\.\d\d/.test(await bar.innerText().catch(() => ''))) why.push('a touch drag did not show the selection bar; ')
+
+      // Cut from the bar shortens the file.
+      const lengthBefore = await length()
+      await bar.getByRole('button', { name: 'Cut' }).click()
+      await pp.waitForTimeout(300)
+      if (!((await length()) < lengthBefore - 0.5)) why.push('Cut in the selection bar did not cut; ')
+
+      // Long press still opens the edit menu.
+      await touch('touchStart', [[at(0.5), y]])
+      await pp.waitForTimeout(700)
+      const menuOpened = await pp.locator('[role=menu][aria-label="Waveform actions"]').count()
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(300)
+      if (!menuOpened) why.push('long press did not open the menu; ')
+      await pp.keyboard.press('Escape')
+
+      // A category tab opens its list as a sheet; tapping it again closes it.
+      await pp.locator('[data-testid=mobile-tab-dynamics]').click()
+      await pp.waitForTimeout(500)
+      if (!(await pp.locator('.ctx-panel.is-sheet').count())) why.push('a category tab did not open its sheet; ')
+      await pp.locator('[data-testid=mobile-tab-dynamics]').click()
+      await pp.waitForTimeout(500)
+      if (await pp.locator('.ctx-panel').count()) why.push('tapping the tab again did not close the sheet; ')
+
+      // The Plugin Chain opens as a sheet with Apply on screen.
+      await pp.locator('[data-testid=mobile-tab-chain]').click()
+      await pp.waitForTimeout(900)
+      const chain = await pp.evaluate(() => {
+        const f = document.querySelector('.win-frame')
+        const a = f?.querySelector('.win-apply')?.getBoundingClientRect()
+        return { isSheet: !!f?.classList.contains('is-sheet'), applyOnScreen: !!a && a.bottom <= innerHeight && a.right <= innerWidth }
+      })
+      if (!chain.isSheet || !chain.applyOnScreen) why.push('the chain did not open as a sheet with Apply on screen; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+
+      // Play starts and stops the transport.
+      await pp.locator('[data-testid=mobile-play]').click()
+      await pp.waitForTimeout(400)
+      const playing = await pp.evaluate(async () =>
+        (await import('/src/composables/useEditorState.js')).useEditorState().state.isPlaying)
+      await pp.locator('[data-testid=mobile-play]').click()
+      if (!playing) why.push('Play did not start playback; ')
+
+      // "Use desktop layout" swaps the shell and keeps the file.
+      await pp.locator('[data-testid=mobile-more]').click()
+      await pp.locator('[data-testid=use-desktop-layout]').click()
+      await pp.waitForTimeout(800)
+      if (await pp.locator('[data-testid=mobile-shell]').count()) why.push('Use desktop layout did not swap the shell; ')
+      if (!(await pp.locator('.selection-bar').count())) why.push('the desktop shell did not come up with the file; ')
+      // ...and the desktop header offers the way back on a phone.
+      await pp.locator('[data-testid=use-phone-layout]').click()
+      await pp.waitForTimeout(800)
+      if (!(await pp.locator('[data-testid=mobile-shell]').count())) why.push('Use phone layout did not bring the mobile shell back; ')
+    } catch (e) {
+      why.push(`threw: ${e.message.split('\n')[0]}; `)
+    } finally {
+      await phone.close()
+    }
+    const fresh = errors.slice(before)
+    const ok = why.length === 0 && fresh.length === 0
+    if (!ok) failures++
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Phone (mobile)'.padEnd(16)} ${why.join('')}${fresh.join(' | ')}`)
   }
 } finally {
   await browser.close()
