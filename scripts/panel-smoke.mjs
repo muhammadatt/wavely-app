@@ -807,6 +807,44 @@ try {
       if (!chain.isSheet || !chain.applyOnScreen) why.push('the chain did not open as a sheet with Apply on screen; ')
       await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
 
+      // The file switcher: Open audio from the sheet adds a file; a row's tap
+      // switches; Rename and Close are labelled buttons behind its ⋯.
+      const fileSheet = pp.locator('[data-testid=mobile-file-sheet]')
+      const fileRows = fileSheet.locator('.m-file-go')
+      await pp.locator('[data-testid=mobile-file-switcher]').click()
+      await pp.waitForTimeout(300)
+      if (!(await fileSheet.count())) why.push('the file name did not open the switcher; ')
+      const chooser2 = pp.waitForEvent('filechooser')
+      await pp.locator('[data-testid=mobile-file-open]').click()
+      await (await chooser2).setFiles(wav)
+      await pp.waitForTimeout(2500)
+      await pp.locator('[data-testid=mobile-file-switcher]').click()
+      await pp.waitForTimeout(300)
+      if ((await fileRows.count()) !== 2) why.push(`the switcher lists ${await fileRows.count()} files, not 2; `)
+      if ((await fileRows.nth(1).getAttribute('aria-current')) !== 'true') why.push('the new file is not the active row; ')
+      await fileRows.nth(0).click()
+      await pp.waitForTimeout(300)
+      if (await fileSheet.count()) why.push('switching did not close the sheet; ')
+      await pp.locator('[data-testid=mobile-file-switcher]').click()
+      await pp.waitForTimeout(300)
+      if ((await fileRows.nth(0).getAttribute('aria-current')) !== 'true') why.push('tapping a row did not switch to it; ')
+      await fileSheet.locator('.m-file-more').nth(1).click()
+      await pp.locator('[data-testid=mobile-file-rename]').click()
+      await pp.locator('[data-testid=mobile-file-rename-input]').fill('Second take.wav')
+      await pp.locator('[data-testid=mobile-file-rename-done]').click()
+      await pp.waitForTimeout(200)
+      if (!/Second take/.test(await fileRows.nth(1).innerText())) why.push('Rename did not rename the file; ')
+      await fileSheet.locator('.m-file-more').nth(1).click()
+      await pp.locator('[data-testid=mobile-file-close]').click()
+      await pp.waitForTimeout(300)
+      if ((await fileRows.count()) !== 1) why.push('Close did not close the file; ')
+      // A category tab takes over from the switcher.
+      await pp.locator('[data-testid=mobile-tab-edit]').click()
+      await pp.waitForTimeout(400)
+      if (await fileSheet.count()) why.push('opening a category left the switcher open; ')
+      await pp.locator('[data-testid=mobile-tab-edit]').click()
+      await pp.waitForTimeout(300)
+
       // Play starts and stops the transport.
       await pp.locator('[data-testid=mobile-play]').click()
       await pp.waitForTimeout(400)
@@ -826,7 +864,7 @@ try {
       await pp.waitForTimeout(800)
       if (!(await pp.locator('[data-testid=mobile-shell]').count())) why.push('Use phone layout did not bring the mobile shell back; ')
     } catch (e) {
-      why.push(`threw: ${e.message.split('\n')[0]}; `)
+      why.push(`threw: ${e.message.split("\n").slice(0, 3).join(" | ")}; `)
     } finally {
       await phone.close()
     }

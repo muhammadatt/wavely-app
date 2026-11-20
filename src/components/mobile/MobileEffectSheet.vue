@@ -5,6 +5,7 @@ import { useOperationDispatch } from '../../composables/useOperationDispatch.js'
 import { useWindows, CHAIN_WINDOW_ID } from '../../composables/useWindows.js'
 import { getCategory, getOperation, groupedOperations, operationsIn } from '../../ui/registry.js'
 import { splitForMobile, targetLine } from '../../ui/mobileEffects.js'
+import { useSheetDrag } from '../../composables/useMobileSheets.js'
 import Icon from '../ui/Icon.vue'
 import PlanBadge from '../ui/PlanBadge.vue'
 import OfflineBadge from '../ui/OfflineBadge.vue'
@@ -54,26 +55,7 @@ function openChain() {
   openWindow(CHAIN_WINDOW_ID)
 }
 
-// ── Drag the handle down to dismiss ─────────────────────────────────────────
-const DISMISS_PX = 72
-const dragY = ref(0)
-let dragFrom = null
-
-function onHandleDown(e) {
-  dragFrom = e.clientY
-  e.currentTarget.setPointerCapture?.(e.pointerId)
-}
-function onHandleMove(e) {
-  if (dragFrom === null) return
-  dragY.value = Math.max(0, e.clientY - dragFrom)
-}
-function onHandleUp() {
-  if (dragFrom === null) return
-  const far = dragY.value >= DISMISS_PX
-  dragFrom = null
-  dragY.value = 0
-  if (far) closeRail()
-}
+const { dragY, handle } = useSheetDrag(closeRail)
 </script>
 
 <template>
@@ -88,10 +70,7 @@ function onHandleUp() {
     <div
       class="m-fx-handle"
       aria-hidden="true"
-      @pointerdown="onHandleDown"
-      @pointermove="onHandleMove"
-      @pointerup="onHandleUp"
-      @pointercancel="onHandleUp"
+      v-on="handle"
     ><span /></div>
 
     <header class="m-fx-head">

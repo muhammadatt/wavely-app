@@ -1,4 +1,5 @@
 <script setup>
+import { watch } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { installEditorShell, useWorkspaceDrop } from '../../composables/editorShell.js'
 import MobileTopBar from './MobileTopBar.vue'
@@ -9,6 +10,8 @@ import WaveformOverview from '../WaveformOverview.vue'
 import WaveformArea from '../WaveformArea.vue'
 import WaveformScrollbar from '../WaveformScrollbar.vue'
 import MobileEffectSheet from './MobileEffectSheet.vue'
+import MobileFileSheet from './MobileFileSheet.vue'
+import { useMobileSheets } from '../../composables/useMobileSheets.js'
 import EmptyState from '../EmptyState.vue'
 import ProcessingOverlay from '../ProcessingOverlay.vue'
 
@@ -25,6 +28,9 @@ import ProcessingOverlay from '../ProcessingOverlay.vue'
  * ⋯ menu switches back.
  */
 const { state, hasFile, hasSelection, hasClipboard } = useEditorState()
+const { fileSheetOpen, closeFileSheet } = useMobileSheets()
+// One sheet at a time: a category opening closes the file switcher.
+watch(() => state.activeTool, tool => { if (tool) closeFileSheet() })
 installEditorShell()
 const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspaceDrop()
 </script>
@@ -56,6 +62,9 @@ const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspac
 
       <Transition name="m-sheet">
         <MobileEffectSheet v-if="state.activeTool" />
+      </Transition>
+      <Transition name="m-sheet">
+        <MobileFileSheet v-if="fileSheetOpen && hasFile" />
       </Transition>
     </div>
 

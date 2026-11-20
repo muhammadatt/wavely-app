@@ -4,17 +4,18 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { useFileImport } from '../../composables/useFileImport.js'
 import { useFileSave } from '../../composables/useFileSave.js'
 import { useFormFactor } from '../../composables/useFormFactor.js'
+import { useMobileSheets } from '../../composables/useMobileSheets.js'
 import { formatDuration } from '../../utils/format.js'
 import Icon from '../ui/Icon.vue'
 import AccountMenu from '../AccountMenu.vue'
 
 /**
  * The mobile shell's header: the active file (its name opens the file
- * switcher — for now the Files panel), its details, Undo / Redo, Save, and a
+ * switcher sheet), its details, Undo / Redo, Save, and a
  * menu for the rest (open, files, Save As, the desktop layout).
  */
 const {
-  state, appState, documents, activeDoc, undo, redo, canUndo, canRedo, hasFile,
+  state, documents, activeDoc, undo, redo, canUndo, canRedo, hasFile,
   documentHasUnsavedWork,
 } = useEditorState()
 const { promptForFiles } = useFileImport()
@@ -37,9 +38,7 @@ const fileCount = computed(() => documents.value.length)
 const position = computed(() => documents.value.findIndex(d => d.id === activeDoc.value?.id) + 1)
 const unsaved = computed(() => !!activeDoc.value && documentHasUnsavedWork(activeDoc.value.id))
 
-function openFiles() {
-  appState.filesPanelOpen = true
-}
+const { fileSheetOpen, toggleFileSheet, openFileSheet } = useMobileSheets()
 
 // ── The overflow menu ───────────────────────────────────────────────────────
 const menuOpen = ref(false)
@@ -64,8 +63,9 @@ function run(action) {
       class="m-file"
       :title="state.currentFile?.name"
       aria-label="Switch file"
+      :aria-expanded="String(fileSheetOpen)"
       data-testid="mobile-file-switcher"
-      @click="openFiles"
+      @click="toggleFileSheet"
     >
       <span class="m-file-name">
         <span class="truncate">{{ state.name }}</span>
@@ -115,7 +115,7 @@ function run(action) {
         </button>
         <div v-if="menuOpen" class="m-menu" role="menu">
           <button type="button" role="menuitem" @click="run(promptForFiles)">Open audio…</button>
-          <button v-if="fileCount" type="button" role="menuitem" @click="run(openFiles)">All files</button>
+          <button v-if="fileCount" type="button" role="menuitem" @click="run(openFileSheet)">All files</button>
           <button v-if="hasFile" type="button" role="menuitem" @click="run(() => saveDocumentAs())">Save as…</button>
           <hr />
           <button type="button" role="menuitem" data-testid="use-desktop-layout" @click="run(() => chooseLayout('desktop'))">Use desktop layout</button>
