@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>crisp.fm</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; background: #0d1015; color: #d7dce3; font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      .lg-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 760px; margin: 0 auto; padding: 18px 24px; }
+      .lg-top img { height: 26px; display: block; }
+      .lg-nav { display: flex; gap: 18px; font-size: 14px; }
+      .lg-nav a { color: #9aa4b2; text-decoration: none; }
+      .lg-nav a[aria-current="page"], .lg-nav a:hover { color: #fff; }
+      .lg-doc { max-width: 760px; margin: 0 auto; padding: 8px 24px 64px; overflow-wrap: anywhere; }
+      .lg-doc h1 { font-size: 34px; line-height: 1.2; color: #fff; margin: 24px 0 8px; }
+      .lg-doc h2 { font-size: 21px; color: #fff; margin: 40px 0 8px; padding-top: 8px; }
+      .lg-doc h3 { font-size: 17px; color: #fff; margin: 28px 0 6px; }
+      .lg-doc h4 { font-size: 15px; color: #fff; margin: 20px 0 4px; }
+      .lg-doc p, .lg-doc li { color: #c3cad4; }
+      .lg-doc ul, .lg-doc ol { padding-left: 22px; }
+      .lg-doc li { margin: 4px 0; }
+      .lg-doc a { color: #5fd4d0; }
+      .lg-doc strong { color: #fff; }
+      .lg-doc code { font: 13px ui-monospace, Menlo, monospace; background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 4px; }
+      .lg-doc hr { border: 0; border-top: 1px solid rgba(255,255,255,.1); margin: 32px 0; }
+      .lg-doc blockquote { margin: 20px 0; padding: 12px 16px; border-left: 3px solid #e8a33d; background: rgba(232,163,61,.07); border-radius: 0 8px 8px 0; }
+      .lg-doc blockquote p { margin: 0; }
+      .lg-foot { max-width: 760px; margin: 0 auto; padding: 20px 24px 40px; border-top: 1px solid rgba(255,255,255,.08); font-size: 13px; color: #7d8795; display: flex; gap: 18px; flex-wrap: wrap; }
+      .lg-foot a { color: #9aa4b2; }
+      @media (max-width: 640px) {
+        .lg-top, .lg-doc, .lg-foot { padding-left: 16px; padding-right: 16px; }
+        .lg-doc h1 { font-size: 28px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="lg-top">
+      <a href="/"><img src="/crisp-fm-logo.png" alt="crisp.fm" /></a>
+      <nav class="lg-nav">
+        <a href="/terms/">Terms</a>
+        <a href="/privacy/">Privacy</a>
+      </nav>
+    </header>
+    <main id="legal" class="lg-doc"><!-- legal-body --></main>
+    <footer class="lg-foot">
+      <a href="/">Open the editor</a>
+      <a href="/effects/">Effects</a>
+      <a href="/terms/">Terms of Service</a>
+      <a href="/privacy/">Privacy Policy</a>
+    </footer>
+    <script type="module" src="/src/legal/main.js"></script>
+  </body>
+</html>

@@ -556,6 +556,14 @@ function onKeydown(e) {
           <div v-if="mode === 'reset'" class="text-[12px] text-[rgba(255,255,255,.45)]">
             Remembered it? <button type="button" class="auth-link" @click="setMode('signIn')">Back to log in</button>
           </div>
+
+          <!-- New tab: never navigate the editor away from unsaved work. -->
+          <p v-if="mode === 'signUp'" class="text-[11.5px] leading-[1.5] text-[rgba(255,255,255,.42)] m-0">
+            By creating an account you agree to the
+            <a href="/terms/" target="_blank" rel="noopener" class="auth-link">Terms of Service</a>
+            and
+            <a href="/privacy/" target="_blank" rel="noopener" class="auth-link">Privacy Policy</a>.
+          </p>
         </form>
       </div>
     </div>

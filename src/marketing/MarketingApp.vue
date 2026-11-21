@@ -214,6 +214,7 @@ onMounted(() => {
 
     <footer class="mk-footer">
       <p>All product names are trademarks of their respective owners and are used only to identify the products whose sound was studied in developing these effects. crisp.fm is not affiliated with or endorsed by them.</p>
+      <p class="mk-legal"><a href="/terms/">Terms of Service</a> · <a href="/privacy/">Privacy Policy</a></p>
     </footer>
   </div>
 </template>
@@ -403,6 +404,9 @@ a { color: inherit; }
 .mk-tile-body { display: flex; flex-direction: column; gap: 6px; padding: 18px; }
 .mk-tile-title { font-size: 19px; font-weight: 700; }
 .mk-tile-text { font-size: 14px; color: var(--mk-soft); line-height: 1.5; }
+
+.mk-legal { margin-top: 8px; }
+.mk-legal a { color: var(--mk-soft); }
 
 .mk-index-head { padding: 56px 0 8px; }
 .mk-empty { padding-top: 80px; }
