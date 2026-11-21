@@ -4,8 +4,11 @@ import { useEditorState } from '../composables/useEditorState.js'
 import { formatDuration } from '../utils/format.js'
 import Icon from './ui/Icon.vue'
 import AccountMenu from './AccountMenu.vue'
+import { useFormFactor } from '../composables/useFormFactor.js'
 
 const { state, undo, redo, canUndo, canRedo } = useEditorState()
+// On a phone someone switched to this layout: the way back to the phone one.
+const { isPhone, chooseLayout } = useFormFactor()
 
 // The active file's properties. They sat on the tab row for a while; with
 // the categories in their own row again (owner, November 2026) the header's
@@ -72,6 +75,18 @@ const fileMeta = computed(() => {
         ><Icon name="redo" :size="15" /><span class="tb-hist-label compact:hidden">Redo</span></button>
       </div>
 
+      <button
+        v-if="isPhone"
+        type="button"
+        class="tb-hist tb-phone"
+        title="Use phone layout"
+        aria-label="Use phone layout"
+        data-testid="use-phone-layout"
+        @click="chooseLayout('mobile')"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.2" /><path d="M11 18.5h2" /></svg>
+      </button>
+
       <AccountMenu />
     </div>
   </div>
@@ -100,6 +115,15 @@ const fileMeta = computed(() => {
 }
 @media (max-height: 520px), (max-width: 640px) {
   .tb-hist { padding: 0; }
+}
+.tb-phone {
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+  border-radius: var(--chrome-btn-radius);
+  background: var(--chrome-btn-bg);
+  box-shadow: var(--chrome-btn-ring);
+  color: var(--chrome-btn-text);
 }
 .tb-hist + .tb-hist { box-shadow: inset 1px 0 0 var(--chrome-btn-seam); }
 .tb-hist:hover:not(:disabled) { background: var(--chrome-btn-hover); color: var(--color-text); }

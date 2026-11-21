@@ -4,17 +4,43 @@ import { ref } from 'vue'
 import { useTryOut } from '../composables/useTryOut.js'
 import { useSessionAutosave } from '../composables/useSessionAutosave.js'
 import BaseButton from './ui/BaseButton.vue'
+import { useEditorState } from '../composables/useEditorState.js'
 
-// Drag-drop is handled once at the workspace level in EditorScreen so files can
+// Drag-drop is handled once at the workspace level (useWorkspaceDrop in
+// composables/editorShell.js, used by both shells) so files can
 // be dropped at any time, not only from here. This component is just the
 // click-to-browse affordance and the import progress readout.
-const { promptForFiles, isImporting, importProgress } = useFileImport()
+const { promptForFiles, importFiles, isImporting, importProgress } = useFileImport()
+const { showToast } = useEditorState()
 // Arrived from a marketing page's "Try it on this clip" (see useTryOut).
 const { tryOut, start: startTryOut, dismiss: dismissTryOut } = useTryOut()
 // Work a closed or crashed tab left behind (see useSessionAutosave).
 const { autosave, restore, discard } = useSessionAutosave()
 // Discarding deletes the only copy, so it takes a second, explicit click.
 const confirmingDiscard = ref(false)
+
+// A short clip to open with one tap, for trying the editor without a file of
+// your own (a phone or an emulator often has none to hand). A click, so the
+// AudioContext the decode needs is allowed to start.
+const SAMPLE_URL = '/samples/drum-loop.mp3'
+const SAMPLE_NAME = 'Drum loop (sample).mp3'
+const loadingSample = ref(false)
+
+async function trySample() {
+  if (loadingSample.value) return
+  loadingSample.value = true
+  try {
+    const res = await fetch(SAMPLE_URL)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const file = new File([await res.blob()], SAMPLE_NAME, { type: 'audio/mpeg' })
+    await importFiles([file])
+  } catch (err) {
+    console.warn('Could not load the sample clip:', err)
+    showToast("Couldn't load the sample — check your connection", 5000, { tone: 'warn' })
+  } finally {
+    loadingSample.value = false
+  }
+}
 
 function recoveryFiles() {
   return autosave.pending.flatMap(p => p.files)
@@ -116,6 +142,14 @@ function savedAgo(ms) {
             {{ fmt }}
           </span>
         </div>
+
+        <button
+          type="button"
+          class="try-own sample-link"
+          :disabled="loadingSample"
+          data-testid="try-sample"
+          @click.stop="trySample()"
+        >{{ loadingSample ? 'Loading the sample…' : 'No file handy? Try a sample' }}</button>
       </template>
     </div>
   </div>
@@ -145,6 +179,7 @@ function savedAgo(ms) {
 }
 .try-own:hover { color: #eaf6f8; }
 .try-own.danger { color: #ff8a80; }
+.sample-link { display: block; margin: 18px auto 0; }
 .recovery-files {
   margin: 12px 0 0;
   padding: 0;

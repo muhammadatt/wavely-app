@@ -1,14 +1,15 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useEditorState } from '../composables/useEditorState.js'
-import { startPlayback, stopPlayback, setPlaybackLoop, setPlaybackRegion } from '../audio/playback.js'
+import { useTransport, installTransport } from '../composables/useTransport.js'
 import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import BaseButton from './ui/BaseButton.vue'
-import { onTogglePlaybackRequest } from '../ui/transportBus.js'
 
-const {
-  state, setPlayhead, getAudioContext, totalDuration, hasSelection, toggleLoop, hasFile,
-} = useEditorState()
+const { state, hasSelection, toggleLoop, hasFile } = useEditorState()
+// Play / Stop / skip and the rules that keep playback in step with the
+// timeline live in the composable, shared with the mobile shell's transport.
+const { togglePlay, skipToStart, skipBack, skipForward } = useTransport()
+installTransport()
 const zoomLevel = ref(0) // 0-100 range for slider; 0 = fully zoomed out (fit to width)
 
 // Zoom bounds are owned by WaveformArea — the floor is "whole file fits the
@@ -28,102 +29,6 @@ function formatTime(seconds) {
   const s = Math.floor(seconds % 60)
   const ms = Math.floor((seconds % 1) * 100)
   return { main: `${m}`, seconds: `:${s.toString().padStart(2, '0')}`, ms: `.${ms.toString().padStart(2, '0')}` }
-}
-
-function togglePlay() {
-  if (state.isPlaying) {
-    stop()
-  } else {
-    play()
-  }
-}
-
-// Whether what is sounding is a selection rather than the whole file. Only
-// then does moving the selection mean anything to the transport: with no
-// region playing, drawing a selection is the user marking something up, not
-// asking playback to jump into it.
-const playingRegion = ref(false)
-
-function play() {
-  const ctx = getAudioContext()
-  state.isPlaying = true
-
-  let startFrom, endAt
-  if (state.selection) {
-    startFrom = state.selection.start
-    endAt = state.selection.end
-  } else {
-    startFrom = state.playhead >= totalDuration.value ? 0 : state.playhead
-    endAt = null
-  }
-
-  playingRegion.value = endAt !== null
-
-  startPlayback(
-    state.segments,
-    startFrom,
-    ctx,
-    (time) => {
-      state.playhead = time
-    },
-    () => {
-      state.isPlaying = false
-      playingRegion.value = false
-    },
-    endAt,
-    // Looping is handled inside the engine, on the audio clock. Restarting from
-    // here instead — the old arrangement — could only ever begin the next pass
-    // one animation frame after the previous one ended, which is the gap at the
-    // seam. A repeat starts where the selection does, or at zero when the whole
-    // file is playing: looping a file from the middle should come back to the
-    // top, not to wherever playback happened to begin.
-    { loop: state.isLooping, loopStart: endAt !== null ? startFrom : 0 },
-  )
-}
-
-function stop() {
-  stopPlayback()
-  state.isPlaying = false
-  playingRegion.value = false
-}
-
-// The loop button is live during playback, so the engine has to hear about a
-// toggle mid-pass rather than only at the next play().
-watch(() => state.isLooping, (looping) => {
-  if (!state.isPlaying) return
-  setPlaybackLoop(looping, state.selection ? state.selection.start : 0)
-})
-
-// So are the selection's edges. Dragging one while a selection loops has to
-// change what the loop plays now — otherwise auditioning a boundary by ear is a
-// stop/adjust/start cycle for every attempt, which is most of what the edges
-// are for.
-//
-// A cleared selection is deliberately not a region change: it happens on every
-// click in the waveform, and stopping or re-scoping playback on a stray click
-// would be worse than letting the loop run on.
-watch(() => state.selection, (sel) => {
-  if (!state.isPlaying || !playingRegion.value || !sel) return
-  setPlaybackRegion(sel.start, sel.end)
-}, { deep: true })
-
-function skipToStart() {
-  if (state.isPlaying) stop()
-  setPlayhead(0)
-}
-
-function skipBack() {
-  if (state.isPlaying) stop()
-  setPlayhead(Math.max(0, state.playhead - 5))
-}
-
-function skipForward() {
-  if (state.isPlaying) stop()
-  setPlayhead(Math.min(totalDuration.value, state.playhead + 5))
-}
-
-function handleTogglePlay() {
-  togglePlay()
 }
 
 function handleZoomIn() {
@@ -160,21 +65,13 @@ function handleViewUpdate(e) {
   zoomLevel.value = Math.max(0, Math.min(100, t * 100))
 }
 
-let offTogglePlay = null
 onMounted(() => {
-  offTogglePlay = onTogglePlaybackRequest(handleTogglePlay)
   window.addEventListener('wavely:view-update', handleViewUpdate)
 })
 
 onUnmounted(() => {
-  offTogglePlay?.()
   window.removeEventListener('wavely:view-update', handleViewUpdate)
 })
-
-// Stop playback when segments change (edit happened during playback)
-watch(() => state.segments, () => {
-  if (state.isPlaying) stop()
-}, { deep: true })
 </script>
 
 <template>

@@ -583,7 +583,13 @@ try {
       viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2,
     })
     const pp = await phone.newPage()
-    await pp.addInitScript(() => { window.showOpenFilePicker = undefined })
+    // The DESKTOP layout on a phone: a touch phone now opens the mobile shell
+    // (checked below), and this pass keeps covering what "Use desktop layout"
+    // leaves a phone user with.
+    await pp.addInitScript(() => {
+      window.showOpenFilePicker = undefined
+      localStorage.setItem('wavely:layout', 'desktop')
+    })
     pp.on('pageerror', e => errors.push(`PAGEERROR (phone) ${e.message}`))
     const why = []
     try {
@@ -687,6 +693,213 @@ try {
     const ok = why.length === 0 && fresh.length === 0
     if (!ok) failures++
     console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Phone (touch)'.padEnd(16)} ${why.join('')}${fresh.join(' | ')}`)
+  }
+
+  /*
+   * The MOBILE SHELL (components/mobile/), which a touch phone gets by default:
+   * the header's file switcher, a touch selection driving the action bar, Cut
+   * through it, a category sheet, the Plugin Chain as a sheet with Apply on
+   * screen, Play, the long-press menu, and "Use desktop layout".
+   */
+  {
+    const before = errors.length
+    const phone = await browser.newContext({
+      viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 },
+      hasTouch: true, isMobile: true, deviceScaleFactor: 2,
+    })
+    const pp = await phone.newPage()
+    await pp.addInitScript(() => { window.showOpenFilePicker = undefined })
+    pp.on('pageerror', e => errors.push(`PAGEERROR (mobile) ${e.message}`))
+    const why = []
+    try {
+      await pp.goto(URL_, { waitUntil: 'networkidle' })
+      if (!(await pp.locator('[data-testid=mobile-shell]').count())) why.push('a touch phone did not get the mobile shell; ')
+      const chooserP = pp.waitForEvent('filechooser')
+      await pp.getByText('Choose audio files').click()
+      await (await chooserP).setFiles(wav)
+      await pp.waitForTimeout(3000)
+      if (!/WAV/.test(await pp.locator('[data-testid=mobile-file-switcher]').innerText())) why.push('the header does not show the file; ')
+
+      const cdp = await phone.newCDPSession(pp)
+      const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', {
+        type, touchPoints: pts.map(([x, y], id) => ({ x, y, id })),
+      })
+      const box = await pp.locator('canvas.waveform-canvas').boundingBox()
+      const y = box.y + box.height / 2
+      const at = f => box.x + box.width * f
+      const length = () => pp.evaluate(async () =>
+        (await import('/src/composables/useEditorState.js')).useEditorState().totalDuration.value)
+
+      // A touch drag selects, with the magnifier up while the finger moves,
+      // and the action bar shows the selection.
+      const loupe = pp.locator('[data-testid=waveform-loupe]')
+      await touch('touchStart', [[at(0.2), y]])
+      for (let f = 0.25; f <= 0.5; f += 0.05) { await touch('touchMove', [[at(f), y]]); await pp.waitForTimeout(16) }
+      await pp.waitForTimeout(100)
+      if (!(await loupe.count())) why.push('no magnifier while a finger drags a selection; ')
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(300)
+      if (await loupe.count()) why.push('the magnifier stayed up after the finger lifted; ')
+      const bar = pp.locator('[data-testid=mobile-selection-bar]')
+      if (!/\d:\d\d\.\d\d/.test(await bar.locator('[data-testid=edge-start]').innerText().catch(() => ''))) why.push('a touch drag did not show the selection bar; ')
+
+      // A tap on a nudge button moves that edge one step, and only that edge.
+      const sel = () => pp.evaluate(async () =>
+        ({ ...(await import('/src/composables/useEditorState.js')).useEditorState().state.selection }))
+      const s0 = await sel()
+      await bar.locator('[data-testid=nudge-start-fwd]').tap()
+      await pp.waitForTimeout(150)
+      const s1 = await sel()
+      if (!(s1.start > s0.start && s1.end === s0.end)) why.push('a nudge did not move the start edge alone; ')
+
+      // Cut from the bar shortens the file.
+      const lengthBefore = await length()
+      await bar.getByRole('button', { name: 'Cut' }).click()
+      await pp.waitForTimeout(300)
+      if (!((await length()) < lengthBefore - 0.5)) why.push('Cut in the selection bar did not cut; ')
+
+      // Long press still opens the edit menu.
+      await touch('touchStart', [[at(0.5), y]])
+      await pp.waitForTimeout(700)
+      const menuOpened = await pp.locator('[role=menu][aria-label="Waveform actions"]').count()
+      await touch('touchEnd', [])
+      await pp.waitForTimeout(300)
+      if (!menuOpened) why.push('long press did not open the menu; ')
+      await pp.keyboard.press('Escape')
+
+      // A category tab opens its effect list as a sheet: the v1 effects first,
+      // the rest behind More; a window opened from it takes the screen and
+      // closes the list; tapping the tab again closes it.
+      const sheet = pp.locator('[data-testid=mobile-effect-sheet]')
+      await pp.locator('[data-testid=mobile-tab-dynamics]').click()
+      await pp.waitForTimeout(500)
+      if (!(await sheet.count())) why.push('a category tab did not open its sheet; ')
+      if (!(await pp.locator('[data-testid=mobile-effect-opto-smooth]').count())) why.push('the sheet does not list LA Vintage 2A; ')
+      if (await pp.locator('[data-testid=mobile-effect-fet-punch]').count()) why.push('a non-v1 plugin shows before More is opened; ')
+      await pp.locator('[data-testid=mobile-effect-more]').click()
+      if (!(await pp.locator('[data-testid=mobile-effect-fet-punch]').count())) why.push('More did not show the rest; ')
+      await pp.locator('[data-testid=mobile-tab-dynamics]').click()
+      await pp.waitForTimeout(500)
+      if (await sheet.count()) why.push('tapping the tab again did not close the sheet; ')
+
+      await pp.locator('[data-testid=mobile-tab-level]').click()
+      await pp.waitForTimeout(400)
+      // A rail view opens inside the sheet, with a way back.
+      await pp.locator('[data-testid=mobile-effect-fade]').click()
+      await pp.waitForTimeout(300)
+      if (!(await pp.locator('[data-testid=mobile-effect-back]').count())) why.push('Fade did not open inside the sheet; ')
+      await pp.locator('[data-testid=mobile-effect-back]').click()
+      await pp.locator('[data-testid=mobile-effect-normalize]').click()
+      await pp.waitForTimeout(800)
+      const win = await pp.evaluate(() => !!document.querySelector('.win-frame.is-sheet'))
+      if (!win) why.push('Peak Normalize did not open as a window sheet; ')
+      if (await sheet.count()) why.push('the list stayed open under the window; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+
+      // The Plugin Chain opens as a sheet with Apply on screen.
+      await pp.locator('[data-testid=mobile-tab-chain]').click()
+      await pp.waitForTimeout(900)
+      const chain = await pp.evaluate(() => {
+        const f = document.querySelector('.win-frame')
+        const a = f?.querySelector('.win-apply')?.getBoundingClientRect()
+        return { isSheet: !!f?.classList.contains('is-sheet'), applyOnScreen: !!a && a.bottom <= innerHeight && a.right <= innerWidth }
+      })
+      if (!chain.isSheet || !chain.applyOnScreen) why.push('the chain did not open as a sheet with Apply on screen; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+
+      // The file switcher: Open audio from the sheet adds a file; a row's tap
+      // switches; Rename and Close are labelled buttons behind its ⋯.
+      const fileSheet = pp.locator('[data-testid=mobile-file-sheet]')
+      const fileRows = fileSheet.locator('.m-file-go')
+      await pp.locator('[data-testid=mobile-file-switcher]').click()
+      await pp.waitForTimeout(300)
+      if (!(await fileSheet.count())) why.push('the file name did not open the switcher; ')
+      const chooser2 = pp.waitForEvent('filechooser')
+      await pp.locator('[data-testid=mobile-file-open]').click()
+      await (await chooser2).setFiles(wav)
+      await pp.waitForTimeout(2500)
+      await pp.locator('[data-testid=mobile-file-switcher]').click()
+      await pp.waitForTimeout(300)
+      if ((await fileRows.count()) !== 2) why.push(`the switcher lists ${await fileRows.count()} files, not 2; `)
+      if ((await fileRows.nth(1).getAttribute('aria-current')) !== 'true') why.push('the new file is not the active row; ')
+      await fileRows.nth(0).click()
+      await pp.waitForTimeout(300)
+      if (await fileSheet.count()) why.push('switching did not close the sheet; ')
+      await pp.locator('[data-testid=mobile-file-switcher]').click()
+      await pp.waitForTimeout(300)
+      if ((await fileRows.nth(0).getAttribute('aria-current')) !== 'true') why.push('tapping a row did not switch to it; ')
+      // Escape in the rename field cancels the rename only: the selection on
+      // the waveform and the switcher both stay.
+      await pp.evaluate(async () => (await import('/src/composables/useEditorState.js')).useEditorState().selectAll())
+      await fileSheet.locator('.m-file-more').nth(1).click()
+      await pp.locator('[data-testid=mobile-file-rename]').click()
+      await pp.locator('[data-testid=mobile-file-rename-input]').press('Escape')
+      await pp.waitForTimeout(150)
+      const afterEsc = await pp.evaluate(async () => !!(await import('/src/composables/useEditorState.js')).useEditorState().state.selection)
+      if (!afterEsc) why.push('Escape in the rename field cleared the selection; ')
+      if (!(await fileSheet.count())) why.push('Escape in the rename field closed the switcher; ')
+      await fileSheet.locator('.m-file-more').nth(1).click()
+      await pp.locator('[data-testid=mobile-file-rename]').click()
+      await pp.locator('[data-testid=mobile-file-rename-input]').fill('Second take.wav')
+      await pp.locator('[data-testid=mobile-file-rename-done]').click()
+      await pp.waitForTimeout(200)
+      if (!/Second take/.test(await fileRows.nth(1).innerText())) why.push('Rename did not rename the file; ')
+      await fileSheet.locator('.m-file-more').nth(1).click()
+      await pp.locator('[data-testid=mobile-file-close]').click()
+      await pp.waitForTimeout(300)
+      if ((await fileRows.count()) !== 1) why.push('Close did not close the file; ')
+      // Above a short plugin window the file name is still tappable, and the
+      // switcher it opens is on top of the window, not behind it; Escape
+      // closes the switcher first.
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(350)
+      if (await fileSheet.count()) why.push('Escape did not close the switcher; ')
+      await pp.evaluate(async () => (await import('/src/composables/useWindows.js')).useWindows().openWindow('normalize'))
+      await pp.waitForTimeout(600)
+      await pp.locator('[data-testid=mobile-file-switcher]').click()
+      await pp.waitForTimeout(400)
+      const onTop = await pp.evaluate(() => {
+        const r = document.querySelector('[data-testid=mobile-file-open]')?.getBoundingClientRect()
+        if (!r) return false
+        return !!document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('[data-testid=mobile-file-sheet]')
+      })
+      if (!onTop) why.push('the switcher opened behind a plugin window; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(350)
+      if (await fileSheet.count()) why.push('Escape did not close the switcher over a window; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+      // A category tab takes over from the switcher.
+      await pp.locator('[data-testid=mobile-tab-edit]').click()
+      await pp.waitForTimeout(400)
+      if (await fileSheet.count()) why.push('opening a category left the switcher open; ')
+      await pp.locator('[data-testid=mobile-tab-edit]').click()
+      await pp.waitForTimeout(300)
+
+      // Play starts and stops the transport.
+      await pp.locator('[data-testid=mobile-play]').click()
+      await pp.waitForTimeout(400)
+      const playing = await pp.evaluate(async () =>
+        (await import('/src/composables/useEditorState.js')).useEditorState().state.isPlaying)
+      await pp.locator('[data-testid=mobile-play]').click()
+      if (!playing) why.push('Play did not start playback; ')
+
+      // "Use desktop layout" swaps the shell and keeps the file.
+      await pp.locator('[data-testid=mobile-more]').click()
+      await pp.locator('[data-testid=use-desktop-layout]').click()
+      await pp.waitForTimeout(800)
+      if (await pp.locator('[data-testid=mobile-shell]').count()) why.push('Use desktop layout did not swap the shell; ')
+      if (!(await pp.locator('.selection-bar').count())) why.push('the desktop shell did not come up with the file; ')
+      // ...and the desktop header offers the way back on a phone.
+      await pp.locator('[data-testid=use-phone-layout]').click()
+      await pp.waitForTimeout(800)
+      if (!(await pp.locator('[data-testid=mobile-shell]').count())) why.push('Use phone layout did not bring the mobile shell back; ')
+    } catch (e) {
+      why.push(`threw: ${e.message.split("\n").slice(0, 3).join(" | ")}; `)
+    } finally {
+      await phone.close()
+    }
+    const fresh = errors.slice(before)
+    const ok = why.length === 0 && fresh.length === 0
+    if (!ok) failures++
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Phone (mobile)'.padEnd(16)} ${why.join('')}${fresh.join(' | ')}`)
   }
 } finally {
   await browser.close()

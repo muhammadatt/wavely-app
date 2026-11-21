@@ -71,3 +71,41 @@ export function hitSelectionEdge({
 export function selectionDragAnchor(selection, edge) {
   return edge === 'start' ? selection.end : selection.start
 }
+
+/**
+ * How far one tap of a nudge button moves a selection edge, for a waveform
+ * drawn at `pps` px per second: about NUDGE_PX on screen, rounded to a 1-2-5
+ * step (1 ms, 2 ms, 5 ms, 10 ms…) so the readout moves in round numbers.
+ * Zooming in makes it finer, down to NUDGE_MIN_S; never coarser than NUDGE_MAX_S.
+ */
+export const NUDGE_PX = 3
+export const NUDGE_MIN_S = 0.001
+export const NUDGE_MAX_S = 1
+
+export function nudgeStep(pps) {
+  if (!(pps > 0)) return NUDGE_MAX_S
+  const raw = NUDGE_PX / pps
+  const exp = Math.floor(Math.log10(raw))
+  const base = 10 ** exp
+  const step = [1, 2, 5, 10].map(m => m * base).find(s => s >= raw * 0.999)
+  return Math.min(NUDGE_MAX_S, Math.max(NUDGE_MIN_S, step))
+}
+
+/**
+ * The selection with one `edge` moved by `delta` seconds, kept inside
+ * [0, `duration`] and never closer than `minLength` to the other edge (an edge
+ * nudged into the other stops there rather than swapping sides). A selection
+ * already shorter than `minLength` (a touch drag can make one) keeps its own
+ * length as the floor, so a nudge never moves an edge the wrong way.
+ *
+ * @param {{start: number, end: number}} selection
+ * @param {'start'|'end'} edge
+ * @returns {{start: number, end: number}}
+ */
+export function nudgedSelection(selection, edge, delta, duration, minLength = NUDGE_MIN_S) {
+  let { start, end } = selection
+  const gap = Math.min(minLength, end - start)
+  if (edge === 'start') start = Math.max(0, Math.min(end - gap, start + delta))
+  else end = Math.min(duration, Math.max(start + gap, end + delta))
+  return { start, end }
+}

@@ -26,6 +26,8 @@ server/bin/
 *.mp3
 # …except the marketing pages' before / after clips (npm run marketing:render).
 !public/effects/*/audio/*.mp3
+# …and the empty state's "Try a sample" clip.
+!public/samples/*.mp3
 *.flac
 *.aiff
 *.m4a

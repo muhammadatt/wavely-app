@@ -135,6 +135,13 @@ export const ICONS = {
   offline: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
+  chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
+  chevronUp: '<polyline points="18 15 12 9 6 15"/>',
+  moreHorizontal: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  pencil: '<path d="M17 3a2.85 2.85 0 014 4L7.5 20.5 2 22l1.5-5.5z"/>',
+  save: '<path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+  saveAs: '<path d="M10 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v3"/><polyline points="7 3 7 8 15 8"/><path d="M19.4 14.6a1.9 1.9 0 012.7 2.7L17 22.4l-3.4.6.6-3.4z"/>',
   search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
   close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
   // Head and shoulders: the account button's stand-in for "Sign in" on a phone.

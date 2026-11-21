@@ -5,7 +5,10 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Installable: home-screen icon, opens full screen. See public/manifest.webmanifest. -->
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- use-credentials: browsers fetch the manifest WITHOUT cookies otherwise,
+         and a protected preview (Vercel Deployment Protection) redirects a
+         cookieless request to its sign-in page, which the page may not read. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="theme-color" content="#0e1216" />
     <meta name="apple-mobile-web-app-title" content="crisp.fm" />

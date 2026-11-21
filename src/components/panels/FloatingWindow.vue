@@ -402,7 +402,8 @@ const viewportW = ref(layoutViewport().w)
 
 /**
  * Phone mode — see `ui/windowSheet.js`. On a small viewport the window is a
- * full-screen sheet, zoomed so the faceplate fits the width, with no drag and
+ * bottom sheet (full width, content height up to the screen), zoomed so the
+ * faceplate fits the width, with no drag and
  * no resize. Its position and size are left untouched underneath, so a window
  * opened on a phone and then met with a desktop viewport (a rotated tablet, a
  * widened browser) floats again where it was.
@@ -437,7 +438,8 @@ const sheetBox = computed(() => sheetGeometry({
  * fold, and that only holds if the body's ceiling accounts for it.
  */
 // A sheet has no ceiling here: its height is CSS's (see the template) — the
-// frame is 100dvh, header and footer are fixed and the body takes the rest.
+// frame is at most 100dvh, header and footer are fixed and the body shrinks and
+// scrolls once the panel would pass it.
 // A JS-computed ceiling can disagree with 100dvh (a mobile browser's toolbars
 // moving), and then the body overflows and pushes the footer, and Apply with
 // it, off the bottom of the screen; flex layout cannot.
@@ -712,7 +714,7 @@ function requestClose() {
     tabindex="-1"
     :style="{
       ...(sheet
-        ? { left: 0, top: 0, width: '100vw', height: '100dvh' }
+        ? { left: 0, bottom: 0, width: '100vw', maxHeight: '100dvh' }
         : { left: pos.x + 'px', top: pos.y + 'px', width: boxWidth + 'px' }),
       zIndex: z,
       // One value, read by the chassis, the faceplate and Apply. Passing the
@@ -941,7 +943,7 @@ function requestClose() {
     -->
     <div
       class="win-face relative min-h-0 flex flex-col"
-      :class="{ 'flex-1': sheet }"
+      :class="{ 'is-sheet-face': sheet }"
       :style="[
         background ? { background } : null,
         // Only the faceplate is zoomed: the header and footer are flexible and
@@ -952,7 +954,7 @@ function requestClose() {
       <div
         ref="bodyEl"
         class="win-body min-h-0 overflow-y-auto"
-        :class="{ 'overflow-x-auto flex-1': sheet }"
+        :class="{ 'overflow-x-auto is-sheet-body': sheet }"
         :style="bodyMaxHeight == null ? null : { maxHeight: `${bodyMaxHeight}px` }"
         @scroll="updateOverflow"
       >
@@ -1768,12 +1770,22 @@ function requestClose() {
 }
 .win-frame.is-frozen { filter: saturate(.6) brightness(.85); transition: filter .15s; }
 
-/* Phone sheet (see ui/windowSheet.js): the whole screen, so no rounded
-   corners and no drop shadow to read as a floating window. Last and
-   important, to outrank the radius utility and the chassis variants. */
+/* Phone sheet (see ui/windowSheet.js): pinned to the bottom edge, full width,
+   as tall as the panel and no taller than the screen — a short faceplate
+   (LA Vintage 2A upright, Peak Normalize) leaves the editor showing above it
+   instead of a slab of empty chassis. Rounded on top only, with a shadow
+   upward, so it reads as a bottom sheet. Past the screen's height the face
+   shrinks and its body scrolls; the header and footer never move, so Apply
+   stays on screen. Last and important, to outrank the radius utility and the
+   chassis variants. */
 .win-frame.is-sheet {
-  border-radius: 0 !important;
-  box-shadow: none !important;
+  border-radius: 16px 16px 0 0 !important;
+  box-shadow: 0 -12px 32px rgba(0, 0, 0, .55) !important;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.win-face.is-sheet-face,
+.win-body.is-sheet-body {
+  flex: 0 1 auto;
 }
 
 /* Narrow sheet header — a phone held upright (see narrowSheet). Two rows:

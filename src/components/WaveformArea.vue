@@ -1,9 +1,10 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue'
 import { renderWaveform, renderOverlay, RULER_GUTTER_HEIGHT } from '../audio/renderer.js'
 import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useCanvasRecovery } from '../composables/useCanvasRecovery.js'
+import WaveformLoupe from './WaveformLoupe.vue'
 import { hitSelectionEdge, selectionDragAnchor } from '../audio/selectionDrag.js'
 import {
   TOUCH_EDGE_GRAB_PX, TOUCH_DRAG_THRESHOLD_PX, LONG_PRESS_MS,
@@ -288,6 +289,16 @@ const touches = new Map() // pointerId → { x, y }, x relative to the canvas
 //      | { kind: 'pinch', startSpanPx, startPps, anchorTime }
 //      | { kind: 'done' } — swallow the rest until every finger is up
 let touchGesture = null
+// The magnifier over a touch drag (WaveformLoupe): where the finger is, in the
+// box, and the edge it is moving. Shown only while a finger selects.
+const loupe = reactive({ active: false, x: 0, y: 0, time: 0, boxW: 0, boxH: 0 })
+function showLoupe(p, time) {
+  const box = container.value?.getBoundingClientRect()
+  Object.assign(loupe, { active: true, x: p.x, y: p.y, time, boxW: box?.width ?? 0, boxH: box?.height ?? 0 })
+}
+function hideLoupe() {
+  loupe.active = false
+}
 let longPressTimer = null
 // Set when a long press opened the menu, until the finger lifts.
 let longPressFired = false
@@ -361,6 +372,7 @@ function touchDown(e) {
     // already under way keeps the selection it made; a pending touch had not
     // committed anything, so there is nothing to undo.
     clearLongPress()
+    hideLoupe()
     isSelecting.value = false
     draggingEdge.value = null
     const [a, b] = [...touches.values()]
@@ -413,6 +425,7 @@ function touchMove(e) {
   if (touchGesture.kind === 'select' && e.pointerId === touchGesture.id) {
     const time = Math.max(0, Math.min(pxToTime(p.x), totalDuration.value))
     setSelection(selectionAnchor.value, time)
+    showLoupe(p, time)
     drawOverlay()
   }
 }
@@ -439,6 +452,7 @@ function touchUp(e, cancelled) {
 
   if (touches.size === 0) {
     clearLongPress()
+    hideLoupe()
     if (longPressFired) { longPressFired = false; startSwallowing() }
     touchGesture = null
     isSelecting.value = false
@@ -735,6 +749,15 @@ onUnmounted(() => {
         ref="overlayCanvas"
         class="absolute inset-0 w-full h-full pointer-events-none"
       ></canvas>
+      <WaveformLoupe
+        v-if="loupe.active"
+        :x="loupe.x"
+        :y="loupe.y"
+        :time="loupe.time"
+        :pixels-per-second="pixelsPerSecond"
+        :box-w="loupe.boxW"
+        :box-h="loupe.boxH"
+      />
     </div>
   </div>
 </template>

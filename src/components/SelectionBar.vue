@@ -1,27 +1,15 @@
 <script setup>
 import { computed } from "vue"
 import { useEditorState } from "../composables/useEditorState.js"
-import { useOperationDispatch } from "../composables/useOperationDispatch.js"
-import { getOperation } from "../ui/registry.js"
+import { useSelectionActions } from "../composables/useSelectionActions.js"
 import BaseButton from "./ui/BaseButton.vue"
 
-const { dispatch } = useOperationDispatch()
-
+const { state, hasSelection, hasClipboard, selectAll } = useEditorState()
+// Shared with the mobile shell's action bar.
 const {
-  state,
-  hasSelection,
-  hasClipboard,
-  performCut,
-  performCopy,
-  performPaste,
-  selectAll,
-  showToast,
-} = useEditorState()
-
-// The bar is always mounted, so every readout has to survive selection === null.
-// Cut, Paste, Silence and Trim change the timeline, which the editor refuses
-// while this file renders an apply; disabled then, like the header's Undo.
-const busy = computed(() => !!state.isProcessing)
+  busy, copy: handleCopy, cut: handleCut, paste: handlePaste,
+  silence: handleSilence, trim: handleTrim,
+} = useSelectionActions()
 
 const EMPTY = "—"
 
@@ -36,34 +24,6 @@ const selectionDuration = computed(() => {
   if (!hasSelection.value) return EMPTY
   return `${(state.selection.end - state.selection.start).toFixed(2)}s`
 })
-
-// Every action below is a no-op without its precondition, so the toast only
-// fires once the operation has actually run.
-function handleCopy() {
-  if (!hasSelection.value) return
-  performCopy()
-  showToast("Copied to clipboard")
-}
-
-function handleCut() {
-  if (!hasSelection.value) return
-  if (performCut()) showToast("Cut to clipboard")
-}
-
-function handlePaste() {
-  if (!hasClipboard.value) return
-  if (performPaste(state.playhead)) showToast("Pasted at playhead")
-}
-
-// Silence and Trim to selection run the registry's `quick` action, so the bar,
-// the Trim / Silence panels and the right-click menu share one action and toast.
-function handleSilence() {
-  dispatch(getOperation('silence'), { quick: true })
-}
-
-function handleTrim() {
-  dispatch(getOperation('trim'), { quick: true })
-}
 </script>
 
 <template>
