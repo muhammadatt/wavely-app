@@ -3,13 +3,13 @@ export default {
   eyebrow: 'Vocal dynamics chain',
   headline: 'Broadcast-ready vocals, no engineer required.',
   pitch: [
-    'The dense, polished, up-front voice of radio and well-produced podcasts — from a classic FET-into-opto chain that’s already wired and tuned for voice. Right in your browser.',
+    'The dense, polished, up-front vocals — for music, podcasts, audiobooks and more.',
   ],
   description: 'Dense, polished, broadcast-ready vocals in your browser: a classic 1176-into-LA-2A chain with de-essing and parallel density, tuned for voice.',
 
   overviewTitle: 'The pro vocal sound, already wired',
   overview: [
-    'The voice on a great podcast or radio show sounds big, close and effortlessly even: every word lands and nothing jumps out. Engineers get there with a chain — a fast 1176 to grab the peaks, an LA-2A to smooth the body, a de-esser, and a parallel copy for density. VoxPressor is that chain, in the order and at the settings a voice needs.',
+    'The voice on a great  — a fast 1176 to grab the peaks, an LA-2A to smooth the body, a de-esser, and a parallel copy for density. VoxPressor is that chain, in the order and at the settings a voice needs.',
     'You get the grip of the FET and the smooth, warm leveling of the opto in one window, with readouts that show what each stage is doing and guide colours that turn amber before you overdo it. The result is the kind of finished, dense vocal you hear on the shows you admire, ready for mastering or delivery.',
   ],
 

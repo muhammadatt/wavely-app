@@ -148,7 +148,7 @@ onMounted(() => {
           <h2 class="mk-h2">{{ page.overviewTitle ?? 'Overview' }}</h2>
           <p
             v-for="(p, i) in page.overview" :key="i"
-            class="mk-overview-text" :class="{ 'mk-overview-text--lead': i === 0 }"
+            class="mk-overview-text" 
           >{{ p }}</p>
         </div>
         <ol v-if="page.features?.length" class="mk-features">
@@ -329,8 +329,7 @@ a { color: inherit; }
   gap: 18px;
   text-align: center;
 }
-.mk-overview-text { margin: 0; font-size: 16px; line-height: 1.7; color: var(--mk-soft); text-wrap: pretty; }
-.mk-overview-text--lead { font-size: 18px; line-height: 1.6; color: var(--mk-text); }
+.mk-overview-text { margin: 0; font-size: 18px; line-height: 1.6; color: var(--mk-text); text-wrap: pretty; }
 .mk-features {
   list-style: none;
   /* The block's full width, so the list and the text share both edges. */

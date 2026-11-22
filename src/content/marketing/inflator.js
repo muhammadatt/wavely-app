@@ -1,14 +1,14 @@
 export default {
   eyebrow: 'Loudness enhancer',
-  headline: 'Bigger, fuller, louder — without crossing the line.',
+  headline: 'Get louder, fatter mixes without hard limiting.',
   pitch: [
-    'More loudness, density and excitement without ever going past full scale. No pumping, no squash — just more.',
+    'Cambridge Inflator instantly adds perceived loudness, depth, and detail to any track. Whether your\'re looking for subtle saturation or full-on punch, Cambridge Inflator creates perceived loudness and density without the pumping or peak-crushing of a traditional limiter. ',
   ],
   description: 'Make a voice or mix sound bigger and louder in your browser: Inflator-style density and detail that never goes past full scale. No pumping. Free.',
-  overviewTitle: 'The mastering secret, for everything',
+  overviewTitle: 'The secret to fat, detailed mixes',
   overview: [
-    'The Oxford Inflator became a mastering favourite because it does something a compressor cannot: it makes a recording feel louder, denser and more exciting without the pumping and squash of heavy compression. It raises quiet detail faster than the loud parts, so a voice or a mix fills out and jumps forward with no pumping and no squash.',
-    'Cambridge Inflator follows the same idea, in your browser. Effect sets how much, Curve shapes the character from smooth to punchy, and a band split treats lows, mids and highs on their own. It never goes past full scale, so you can push it hard and keep your headroom.',
+    'Sony\'s Oxford Inflator became a mastering secret weapon because it offered something unique that traditional compressor/limiters could not: it made recordings feel louder, denser and more exciting without the typical artifacts of heavy compression. Instead of squashing peaks it raises quiet details, adding instant depth and forward presence.',
+    'Cambridge Inflator faithfully replicates the harmonic algorithm from the original Inflator with 4x oversampling, band/split modes and more.',
   ],
   features: [
     { title: 'Instant loudness', text: 'more apparent volume, never past full scale' },

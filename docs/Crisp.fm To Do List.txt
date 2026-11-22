@@ -69,14 +69,54 @@ Consider replacing tanh waveshaper with a tube sat type saturator
 
 Marker/Regions
 
-Splitting files into regions/markers/items intelligently and exporting them as files
-Split by silences/markers (with leading/trailing silence, fades)
-Adding markers automatically
-Creating/exporting labels (regions) 
-Rudimentary “gap” marker & “Split by markers”
-“Smart split”/"Auto-split" 
-"Snap to zero" (toggle)
+- Splitting files into regions/markers/items intelligently and exporting them as files
+- Split by silences/markers (with leading/trailing silence, fades)
+- Adding markers automatically
+- Creating/exporting labels (regions) 
+- Rudimentary “gap” marker & “Split by markers”
+- “Smart split”/"Auto-split" 
+- "Snap to zero" (toggle)
+- Double click to selection region between markers/edges
+- Split at markers adds split points at markers, but labels are tied to markers not split points
+- Clearer: "Add marker" or "Add split point" and keep "convert markers to split"
+- Add labels to split and markers?
 
 
 
+References:
+
+EL FATSO
+
+https://help.uaudio.com/hc/en-us/articles/33030906406676-Empirical-Labs-EL7-Fatso-Manual
+
+Schwabe Digital HiFal
+
+https://www.schwabedigital.com/sdu/hifal01
+
+Tokyo Dawn Labs Limen
+
+https://www.production-expert.com/production-expert-1/tokyo-dawn-records-and-ohlhorst-digital-release-limen-a-high-frequency-acceleration-limiter-plugin
+
+TDR Limiter 6 GE High Frequency Limiter
+
+https://www.production-expert.com/production-expert-1/7-superb-plugin-limiters-worth-checking-out-in-2023
+
+
+
+Preview page with audio player with on/bypass control for previewing the effect of the plugin
+
+https://www.uaudio.com/products/studer-a800-tape-recorder
+
+https://www.waves.com/plugins/atlas-reverb?_gl=1*1f88yt8*_up*MQ..*_ga*MTgxMDAxMjMxNi4xNzkzMjE2NTk4*_ga_QGSDDSM0JK*czE3OTMyMTY1OTckbzEkZzAkdDE3OTMyMTY1OTckajYwJGwxJGg1NjQ3NDY2NzEkZHAwZFdDb1FRTVluRmdSRHpYQmVLSno3VGF4c09UbHZZWlE.
+
+
+Possibly an interactive screenshot like
+
+https://u-he.com/products/presswerk/
+
+
+
+User Guide
+
+https://assets.wavescdn.com/pdf/plugins/scheps-parallel-particles.pdf
 

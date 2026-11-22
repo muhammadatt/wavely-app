@@ -1,30 +1,26 @@
 export default {
   eyebrow: 'Opto leveling amplifier',
-  headline: 'The silky, warm vocal sound of a studio legend.',
+  headline: 'The silky, warm sound of a studio legend.',
   pitch: [
-    'Smooth, musical leveling that pulls a voice forward and wraps it in tube warmth. Two knobs, and it’s hard to make it sound bad — right in your browser.',
+    'Modeled after the world\'s most famous opto-compressor, the LA Vintage 2A adds analog warmth and richness to vocals, synths, guitars and full mixes.',
   ],
   description: 'The smooth, warm sound of a classic opto compressor, in your browser. Pull a voice forward and level it without squashing it. Free to use.',
 
   overviewTitle: 'The sound of countless great vocals',
   overview: [
-    'For more than half a century, engineers have reached for the LA-2A when a voice has to sound finished: smooth, forward and warm, with every word sitting right where it should. Its optical cell reacts more like an ear than a meter — it eases into loud phrases and lets go slowly — so a performance comes out even without losing its life.',
-    'LA Vintage 2A brings that character to your browser: the creamy opto compression, the tube harmonics that thicken a voice, and the famous simplicity — turn up Peak Reduction until it sounds right. It takes care of the fiddly parts, so a setting you like works on a quiet take and a hot one, and the result never gets louder than your original peak.',
+    'For over 50 years, studio mix engineers have reached for the LA-2A compressor to give vocals warmth, fullness and polish. Its optical cell eases into loud phrases and releases slowly — adding warmth and fullness while remaining remarkably transparent.',
+    'LA Vintage 2A was painstakingly modeled to re-create the classic creamy opto-compression and rich tube harmonics of the original hardware - right in your browser.',
   ],
 
   features: [
     { title: 'Silky opto leveling', text: 'rides whole phrases, so the voice stays even and natural' },
-    { title: 'Voice up front', text: 'pulls a vocal forward and keeps every word audible' },
-    { title: 'Tube warmth', text: 'valve harmonics that thicken and round out a voice' },
-    { title: 'Smooth, never squashed', text: 'a slow, program-dependent release keeps the performance breathing' },
-    { title: 'Parallel thickening', text: 'blend the dry voice back in for density with natural attacks' },
+    { title: 'Vocal glue', text: 'pulls a vocal forward, adding presence and clarity' },
+    { title: 'Tube warmth', text: 'valve harmonics provide thickness and warmth' },
+    { title: 'Multi-stage, program-dependent release', text: 'for smoothest, most natural transparent compression' },
+    { title: 'Parallel mode', text: 'blend the dry voice back in for density with natural range' },
     { title: 'Beyond vocals', text: 'the same smooth control on bass, guitar and narration' },
-    { title: 'Limit mode', text: 'firmer control for peaky, dynamic performances' },
-    { title: 'Clean when you need it', text: 'switch the harmonics off for transparent leveling' },
-    { title: 'Two-knob simplicity', text: 'turn up Peak Reduction until it sounds right' },
-    { title: 'Same sound, any level', text: 'a setting you like works on quiet and hot recordings alike' },
-    { title: 'Never clips', text: 'automatic makeup that never passes your original peak' },
-    { title: 'Free in your browser', text: 'no plugin to buy, no DAW, nothing to install' },
+    { title: 'Two-knob simplicity', text: 'turn on auto gain and turn up Peak Reduction until desired effect is reached' },
+    { title: 'Free, in your browser', text: 'no plugin to buy, no DAW, nothing to install' },
   ],
 
   samples: [
