@@ -203,6 +203,50 @@ function marketingPages(devPanels, siteUrl) {
   }
 }
 
+/**
+ * The legal pages (`legal/index.html`, `src/legal/`), at `/terms/` and
+ * `/privacy/`. The documents are Markdown in `src/content/legal/`, so they can
+ * be edited as text: the dev server reloads on save, and the build renders
+ * each into its own copy of the entry (`terms/index.html`, …) with the text
+ * already in the HTML — readable by crawlers and with scripts off.
+ */
+function legalPages() {
+  const rewrite = (req, _res, next) => {
+    const path = (req.url || '').split('?')[0]
+    if (/^\/(terms|privacy)(\/(index\.html)?)?$/.test(path)) req.url = '/legal/index.html'
+    next()
+  }
+  return {
+    name: 'wavely:legal-pages',
+    configureServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    generateBundle: { order: 'post', async handler(_options, bundle) {
+      const entry = bundle['legal/index.html']
+      if (!entry) return
+      const { readFile } = await import('node:fs/promises')
+      const { renderMarkdown } = await import('./src/legal/markdown.js')
+      const { LEGAL_PAGES } = await import('./src/legal/pages.js')
+      const html = String(entry.source)
+      for (const [id, page] of Object.entries(LEGAL_PAGES)) {
+        const md = await readFile(new URL(`./src/content/legal/${page.file}`, import.meta.url), 'utf8')
+        const { html: body, title } = renderMarkdown(md)
+        const name = (title || page.label).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        this.emitFile({
+          type: 'asset',
+          fileName: `${id}/index.html`,
+          source: html
+            .replace(/<title>[^<]*<\/title>/, `<title>${name} — crisp.fm</title>`)
+            .replace('<!-- legal-body -->', () => body),
+        })
+      }
+    } },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // Read the env exactly as Vite will, including .env files. The '' prefix
   // loads every variable, not just VITE_-prefixed ones, so the value is seen
@@ -215,6 +259,7 @@ export default defineConfig(({ mode }) => {
       stripDevOnlyModules(devPanels),
       helpPages(devPanels),
       marketingPages(devPanels, env.SITE_URL),
+      legalPages(),
       vue(),
       tailwindcss(),
     ],
@@ -224,6 +269,7 @@ export default defineConfig(({ mode }) => {
           main: fileURLToPath(new URL('./index.html', import.meta.url)),
           help: fileURLToPath(new URL('./help/index.html', import.meta.url)),
           effects: fileURLToPath(new URL('./effects/index.html', import.meta.url)),
+          legal: fileURLToPath(new URL('./legal/index.html', import.meta.url)),
         },
       },
     },

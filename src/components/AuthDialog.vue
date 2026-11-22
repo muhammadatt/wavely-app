@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import LegalConsentNote from './LegalConsentNote.vue'
 import { useAuth } from '../composables/useAuth.js'
 import { useModalFocus } from '../composables/useModalFocus.js'
 import { AUTH_PROVIDERS } from '../auth/config.js'
@@ -445,6 +446,7 @@ function onKeydown(e) {
           </div>
           <div v-if="error" class="auth-error" role="alert"><span>{{ error }}</span></div>
           <button type="button" class="auth-link self-start" @click="setView('pw')">← Use a password instead</button>
+          <LegalConsentNote v-if="mode === 'signUp'" />
         </form>
 
         <!-- ── Email + password (and reset / recovery) ───────────── -->
@@ -556,6 +558,8 @@ function onKeydown(e) {
           <div v-if="mode === 'reset'" class="text-[12px] text-[rgba(255,255,255,.45)]">
             Remembered it? <button type="button" class="auth-link" @click="setMode('signIn')">Back to log in</button>
           </div>
+
+          <LegalConsentNote v-if="mode === 'signUp'" />
         </form>
       </div>
     </div>
