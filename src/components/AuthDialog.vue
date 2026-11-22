@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import LegalConsentNote from './LegalConsentNote.vue'
 import { useAuth } from '../composables/useAuth.js'
 import { useModalFocus } from '../composables/useModalFocus.js'
 import { AUTH_PROVIDERS } from '../auth/config.js'
@@ -445,6 +446,7 @@ function onKeydown(e) {
           </div>
           <div v-if="error" class="auth-error" role="alert"><span>{{ error }}</span></div>
           <button type="button" class="auth-link self-start" @click="setView('pw')">← Use a password instead</button>
+          <LegalConsentNote v-if="mode === 'signUp'" />
         </form>
 
         <!-- ── Email + password (and reset / recovery) ───────────── -->
@@ -557,13 +559,7 @@ function onKeydown(e) {
             Remembered it? <button type="button" class="auth-link" @click="setMode('signIn')">Back to log in</button>
           </div>
 
-          <!-- New tab: never navigate the editor away from unsaved work. -->
-          <p v-if="mode === 'signUp'" class="text-[11.5px] leading-[1.5] text-[rgba(255,255,255,.42)] m-0">
-            By creating an account you agree to the
-            <a href="/terms/" target="_blank" rel="noopener" class="auth-link">Terms of Service</a>
-            and
-            <a href="/privacy/" target="_blank" rel="noopener" class="auth-link">Privacy Policy</a>.
-          </p>
+          <LegalConsentNote v-if="mode === 'signUp'" />
         </form>
       </div>
     </div>

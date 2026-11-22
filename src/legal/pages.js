@@ -12,9 +12,13 @@ export const LEGAL_PAGES = {
   privacy: { file: 'privacy.md', label: 'Privacy Policy' },
 }
 
-/** `/terms/`, `/privacy` → 'terms' / 'privacy'; anything else → null. */
+/**
+ * `/terms/`, `/privacy`, `/terms/index.html` → 'terms' / 'privacy'; anything
+ * else → null. The `index.html` form is the file the build writes, which a
+ * host may serve under its own name.
+ */
 export function legalPageFromPath(pathname) {
-  const m = /^\/([a-z-]+)\/?$/.exec(pathname || '')
+  const m = /^\/([a-z-]+)(?:\/(?:index\.html)?)?$/.exec(pathname || '')
   return m && LEGAL_PAGES[m[1]] ? m[1] : null
 }
 

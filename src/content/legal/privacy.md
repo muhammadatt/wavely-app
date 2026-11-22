@@ -27,7 +27,7 @@ This policy explains what personal data crisp.fm collects, why, how long we keep
 - the audio is uploaded, processed and the result returned to you;
 - an upload that is not used is deleted after 60 minutes of inactivity; an upload is moved out of the upload store as soon as a job takes it;
 - finished results are held in memory for download and deleted when downloaded or one hour after the job finishes, whichever comes first; temporary processing files are deleted when the job ends;
-- we do not listen to your audio, use it to train machine-learning models, or share it with anyone other than the hosting providers that run our servers.
+- we do not listen to your audio, use it to train machine-learning models, or share it with anyone other than the hosting provider that runs our processing servers and our network provider (Cloudflare), through which uploads pass in transit.
 
 **Kept in your browser.** To protect unsaved work, the editor keeps copies of files with unsaved edits in your browser's private storage (the Origin Private File System), with your timeline and selection. This stays on your device and is never sent to us. It is removed when you save or discard the work, or you can remove it by clearing this site's data in your browser.
 
@@ -62,7 +62,7 @@ The Service stores a few things in your browser so it works:
 
 These are strictly necessary for the features you use, or are preferences you set, so we do not ask for consent separately. Clearing your browser's site data removes them.
 
-The product and help pages load fonts from Google Fonts, which means your browser connects to Google, which receives your IP address. [Consider self-hosting the fonts to remove this.]
+The editor, product and help pages load fonts from Google Fonts, which means your browser connects to Google, which receives your IP address. [Consider self-hosting the fonts to remove this.]
 
 ## 4. How we use information and our legal bases
 
@@ -83,8 +83,8 @@ We share personal data only with providers that process it on our behalf, under 
 - **Stripe** — payments and subscription management. Stripe is also an independent controller for some data under its own [privacy policy](https://stripe.com/privacy).
 - **Vercel** — hosts the website and editor.
 - **[SERVER HOSTING PROVIDER]** — hosts our processing servers, where uploaded audio is processed.
-- **Cloudflare** — network security and delivery for our API.
-- **Google** — sign-in with Google (if you choose it) and web fonts on product pages.
+- **Cloudflare** — network security and delivery for our API; audio you upload for processing passes through it in transit.
+- **Google** — sign-in with Google (if you choose it) and web fonts.
 - **[EMAIL PROVIDER]** — sends sign-in and account emails.
 
 We may also disclose information if required by law, to protect the rights and safety of our users or others, or as part of a merger, acquisition or sale of assets, in which case this policy will continue to apply to your data.

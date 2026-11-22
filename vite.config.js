@@ -213,7 +213,7 @@ function marketingPages(devPanels, siteUrl) {
 function legalPages() {
   const rewrite = (req, _res, next) => {
     const path = (req.url || '').split('?')[0]
-    if (/^\/(terms|privacy)\/?$/.test(path)) req.url = '/legal/index.html'
+    if (/^\/(terms|privacy)(\/(index\.html)?)?$/.test(path)) req.url = '/legal/index.html'
     next()
   }
   return {

@@ -26,17 +26,21 @@ export function slugify(text) {
 
 function inline(raw) {
   let s = esc(raw)
-  const codes = []
-  s = s.replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`)
+  // Code spans and URLs are set aside as placeholders before the emphasis
+  // rules run, so a `_` or `*` inside them is never read as markup.
+  const held = []
+  const hold = html => `\u0000${held.push(html) - 1}\u0000`
+  s = s.replace(/`([^`]+)`/g, (_, c) => hold(`<code>${c}</code>`))
+  // A link's text keeps its emphasis; only the opening tag is held.
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, text, href) => {
     const safe = /^(https?:|mailto:|\/|#)/i.test(href) ? href : '#'
-    return `<a href="${safe}">${text}</a>`
+    return `${hold(`<a href="${safe}">`)}${text}</a>`
   })
-  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:])/g, '$1<a href="$2">$2</a>')
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)\u0000]+[^\s<).,;:\u0000])/g, (_, pre, url) => `${pre}${hold(`<a href="${url}">${url}</a>`)}`)
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
   s = s.replace(/(^|[^\w*])\*([^*\s][^*]*)\*(?!\w)/g, '$1<em>$2</em>')
   s = s.replace(/(^|[^\w])_([^_\s][^_]*)_(?!\w)/g, '$1<em>$2</em>')
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`)
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => held[i])
 }
 
 /**
@@ -47,7 +51,7 @@ export function renderMarkdown(source) {
   const text = String(source).replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '')
   const lines = text.split('\n')
   const out = []
-  const used = new Map()
+  const used = new Set()
   let title = ''
   let para = []
   let list = null // { tag, items: [] }
@@ -76,10 +80,11 @@ export function renderMarkdown(source) {
       const level = m[1].length
       const html = inline(m[2])
       if (level === 1 && !title) title = m[2].replace(/[*_`]/g, '')
-      let id = slugify(html) || 'section'
-      const n = used.get(id) ?? 0
-      used.set(id, n + 1)
-      if (n) id = `${id}-${n + 1}`
+      // Unique even against a heading whose own text ends in "-2".
+      const base = slugify(html) || 'section'
+      let id = base
+      for (let n = 2; used.has(id); n++) id = `${base}-${n}`
+      used.add(id)
       out.push(`<h${level} id="${id}">${html}</h${level}>`)
       continue
     }

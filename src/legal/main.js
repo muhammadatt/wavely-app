@@ -16,8 +16,11 @@ const id = legalPageFromPath(location.pathname)
 const root = document.getElementById('legal')
 
 if (!id) {
-  document.title = 'Not found — crisp.fm'
-  root.innerHTML = '<h1>Page not found</h1><p><a href="/terms/">Terms of Service</a> · <a href="/privacy/">Privacy Policy</a></p>'
+  // Never replace a page the build already rendered into this HTML.
+  if (!root.children.length) {
+    document.title = 'Not found — crisp.fm'
+    root.innerHTML = '<h1>Page not found</h1><p><a href="/terms/">Terms of Service</a> · <a href="/privacy/">Privacy Policy</a></p>'
+  }
 } else {
   const { html, title } = renderMarkdown(sources[`../content/legal/${LEGAL_PAGES[id].file}`] ?? '')
   root.innerHTML = html
@@ -26,5 +29,9 @@ if (!id) {
     if (a.getAttribute('href') === `/${id}/`) a.setAttribute('aria-current', 'page')
   }
   // A #fragment on load points into text that did not exist until now.
-  if (location.hash) document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView()
+  if (location.hash) {
+    let target = location.hash.slice(1)
+    try { target = decodeURIComponent(target) } catch { /* malformed escape: try it raw */ }
+    document.getElementById(target)?.scrollIntoView()
+  }
 }
