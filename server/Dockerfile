@@ -67,6 +67,7 @@ COPY --from=node-deps /app/server/node_modules server/node_modules
 COPY src/audio/presets.js src/audio/presets.js
 COPY src/auth/plans.js    src/auth/plans.js
 COPY src/audio/noiseReductionParams.js src/audio/noiseReductionParams.js
+COPY src/platform/consentRegions.js src/platform/consentRegions.js
 COPY data/reference_curves data/reference_curves
 COPY server server
 

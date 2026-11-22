@@ -5,5 +5,9 @@
  */
 import { createApp } from 'vue'
 import MarketingApp from './MarketingApp.vue'
+import { consent } from '../platform/consent.js'
 
 createApp(MarketingApp).mount('#marketing')
+// Ad consent (src/platform/consent.js): inert unless a pixel id is configured.
+// The marketing pages are the ONLY place it starts — the editor loads no pixel.
+consent.start()

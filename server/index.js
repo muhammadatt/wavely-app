@@ -6,6 +6,7 @@ import { jobsRoute }   from './routes/jobs.js'
 import { createSpotRoute }    from './routes/spot.js'
 import { createAnalyzeRoute } from './routes/analyze.js'
 import { meRoute } from './routes/me.js'
+import { consentRoute } from './routes/consent.js'
 import { readAuthConfig, createTokenVerifier } from './lib/auth.js'
 import { getSupabaseAdmin } from './lib/supabaseAdmin.js'
 import { createEntitlementGate, createPlanResolver } from './lib/entitlements.js'
@@ -167,6 +168,10 @@ const accountLimiter = rateLimit({
 })
 app.use('/api/me', accountLimiter)
 
+// Ad consent (routes/consent.js): one region lookup per page without a stored
+// choice, one POST per choice — the account budget is ample.
+app.use('/api/consent', accountLimiter)
+
 // Resumable uploads arrive in ≤ 20 MB PATCHes: an hour of stereo is ~65 of
 // them, so the budget is per-request generous. The store's own limits (size,
 // uploads in flight, bytes per caller, disk) do the real work.
@@ -231,6 +236,8 @@ app.use('/api', createSpotRoute({ gate, limit, takeUpload, jobs: processingJobs 
 app.use('/api', createAnalyzeRoute({ gate, limit, takeUpload }))
 
 // Signed-in user's account and plan
+app.use('/api', consentRoute())
+
 app.use('/api', meRoute({ verify: verifyAccessToken, admin: supabaseAdmin }))
 
 // Checkout, the customer portal and prices (Stripe)

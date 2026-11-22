@@ -10,7 +10,7 @@
  * the control descriptions and screenshots from the help pages, and imports
  * nothing from the editor.
  */
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   MARKETING, marketingIdForSlug, marketingPageTitle, marketingTitle, marketingUrl, publishedMarketingIds, spotOnFace, tryOutUrl,
 } from '../content/marketing/index.js'
@@ -20,6 +20,8 @@ import { DEV_TUNING_PANELS } from '../devFlags.js'
 import { marketingSlugFromPath } from './route.js'
 import ABPlayer from './ABPlayer.vue'
 import PanelTour from '../components/tour/PanelTour.vue'
+import ConsentBar from '../components/consent/ConsentBar.vue'
+import { consent } from '../platform/consent.js'
 
 const SHOTS = Object.fromEntries(
   Object.entries(import.meta.glob('../content/help/shots/*.json', { eager: true, import: 'default' }))
@@ -92,6 +94,12 @@ const index = published.map(r => ({
 }))
 
 // The build writes the title into each page's HTML; the dev server serves one entry for all.
+// "Your privacy choices" — shown wherever ad consent is live (opt-in and
+// opt-out regions alike: it is how a choice is withdrawn or an opt-out made).
+const consentLive = ref(false)
+const stopConsent = consent.subscribe(s => { consentLive.value = s.ready && !s.inert })
+onBeforeUnmount(stopConsent)
+
 onMounted(() => {
   if (page) document.title = marketingPageTitle(id)
   else if (notFound) document.title = 'Effect not found — crisp.fm'
@@ -213,8 +221,10 @@ onMounted(() => {
     </main>
 
     <footer class="mk-footer">
+      <p v-if="consentLive"><button type="button" class="mk-privacy" @click="consent.reopen()">Your privacy choices</button></p>
       <p>All product names are trademarks of their respective owners and are used only to identify the products whose sound was studied in developing these effects. crisp.fm is not affiliated with or endorsed by them.</p>
     </footer>
+    <ConsentBar />
   </div>
 </template>
 
@@ -416,6 +426,18 @@ a { color: inherit; }
   line-height: 1.6;
   color: var(--mk-muted);
 }
+
+.mk-privacy {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mk-soft);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.mk-privacy:hover { color: var(--mk-text); }
 
 @media (max-width: 900px) {
   .mk-hero, .mk-split { grid-template-columns: 1fr; }
