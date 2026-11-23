@@ -50,6 +50,7 @@ test('the work-in-progress plugins are hidden from production builds', () => {
     'plosive',
     'saturation-bench',
     'scheps-parallel',
+    'split',
     'vocal-saturation',
     'voicerx',
   ])

@@ -2,6 +2,7 @@
 import { useEditorState } from '../../composables/useEditorState.js'
 import { useSelectionActions } from '../../composables/useSelectionActions.js'
 import Icon from '../ui/Icon.vue'
+import { DEV_TUNING_PANELS } from '../../devFlags.js'
 
 /**
  * The selection's actions, in place of the desktop's right-click menu. Always
@@ -19,7 +20,7 @@ const { busy, cut, copy, paste, silence, trim, split } = useSelectionActions()
 <template>
   <!-- ONE bar, as on the desktop: see the header comment. -->
   <div class="m-sel" data-testid="mobile-selection-bar">
-    <div class="m-sel-actions">
+    <div class="m-sel-actions" :style="{ '--m-act-cols': DEV_TUNING_PANELS ? 7 : 6 }">
       <button
         v-if="state.selection"
         type="button"
@@ -42,7 +43,10 @@ const { busy, cut, copy, paste, silence, trim, split } = useSelectionActions()
       <button type="button" class="m-act" :disabled="!hasClipboard || busy" @click="paste"><Icon name="paste" :size="17" />Paste</button>
       <button type="button" class="m-act" :disabled="!state.selection || busy" @click="silence"><Icon name="silence" :size="17" />Silence</button>
       <button type="button" class="m-act" :disabled="!state.selection || busy" @click="trim"><Icon name="trim" :size="17" />Trim</button>
+      <!-- Split is dev-only while the split / regions / markers work is on
+           its own branch (the registry's Split is gated the same way). -->
       <button
+        v-if="DEV_TUNING_PANELS"
         type="button"
         class="m-act"
         :disabled="busy"
@@ -64,7 +68,7 @@ const { busy, cut, copy, paste, silence, trim, split } = useSelectionActions()
   gap: 6px;
   border-top: 1px solid var(--mob-bar-border);
 }
-.m-sel-actions { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.m-sel-actions { display: grid; grid-template-columns: repeat(var(--m-act-cols, 7), 1fr); gap: 5px; }
 .m-act {
   display: flex;
   flex-direction: column;

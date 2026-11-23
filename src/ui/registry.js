@@ -248,6 +248,8 @@ const ALL_OPERATIONS = [
     requires: 'file',
     surface: 'rail',
     component: SplitPanel,
+    // Split / regions / markers is being reworked on its own branch.
+    release: 'dev',
   },
   {
     id: 'silence',
