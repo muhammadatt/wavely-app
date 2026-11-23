@@ -1,47 +1,40 @@
 /**
- * The phone's effect-list sheet (components/mobile/MobileEffectSheet.vue):
- * which effects it leads with, and its target line (ui/mobileEffects.js).
+ * The phone's Effects menu (components/mobile/MobileEffectsMenu.vue): which
+ * operations it lists and in what group order, and the tool sheet's target
+ * line (ui/mobileEffects.js).
  *
  * Run with:  npm test
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { MOBILE_V1_OPERATION_IDS, isMobileV1, splitForMobile, targetLine } from '../../src/ui/mobileEffects.js'
+import {
+  MOBILE_EXCLUDED_CATEGORIES, MOBILE_MENU_CATEGORY_ORDER, mobileMenuOperations, targetLine,
+} from '../../src/ui/mobileEffects.js'
 
-test('every v1 id names a released operation in the registry', () => {
+test('the menu lists every effect, but not the one-tap edits or other surfaces', () => {
+  const ops = [
+    { id: 'cut', category: 'edit', surface: 'immediate' },
+    { id: 'trim', category: 'edit', surface: 'rail' },
+    { id: 'fade', category: 'level', surface: 'rail' },
+    { id: 'fet-punch', category: 'dynamics', surface: 'window' },
+    { id: 'presets', category: 'master', surface: 'rail' },
+    { id: 'plugin-chain', category: null, surface: 'window' },
+  ]
+  assert.deepEqual(mobileMenuOperations(ops).map(o => o.id), ['trim', 'fade', 'fet-punch'])
+})
+
+test('the group order names every toolbar category but the excluded ones', () => {
   // Read as source: the registry imports every panel's .vue file.
   const src = readFileSync(new URL('../../src/ui/registry.js', import.meta.url), 'utf8')
-  const entries = src.split(/\n  \{\n/).slice(1)
-  const byId = new Map()
-  for (const e of entries) {
-    const id = e.match(/^\s+id: '([^']+)'/m)?.[1]
-    if (id) byId.set(id, e)
-  }
-  for (const id of MOBILE_V1_OPERATION_IDS) {
-    assert.ok(byId.has(id), `${id} is in the registry`)
-    assert.ok(!/release: 'dev'/.test(byId.get(id)), `${id} ships in production`)
-  }
-  assert.ok(!MOBILE_V1_OPERATION_IDS.includes('plugin-chain'), 'the chain is a tab and a door, not a row')
+  const block = src.slice(src.indexOf('const ALL_CATEGORIES'), src.indexOf('const ALL_OPERATIONS'))
+  const ids = [...block.matchAll(/^\s+id: '([^']+)'/gm)].map(m => m[1])
+  assert.ok(ids.length >= 5, 'read the categories')
+  const expected = ids.filter(id => !MOBILE_EXCLUDED_CATEGORIES.has(id)).sort()
+  assert.deepEqual([...MOBILE_MENU_CATEGORY_ORDER].sort(), expected)
 })
 
-test('the split keeps groups and order, and puts the rest under More', () => {
-  const op = id => ({ id })
-  const groups = [
-    { group: 'Noise', operations: [op('noise-reduction')] },
-    { group: 'Harshness', operations: [op('de-esser'), op('hf-limiter')] },
-    { group: 'Pops & Hum', operations: [op('hum-remover')] },
-  ]
-  const { primary, more } = splitForMobile(groups)
-  assert.deepEqual(primary.map(g => [g.group, g.operations.map(o => o.id)]), [
-    ['Noise', ['noise-reduction']],
-    ['Harshness', ['de-esser']],
-  ], 'a group with no v1 effect is dropped from the lead list')
-  assert.deepEqual(more.map(o => o.id), ['hf-limiter', 'hum-remover'])
-  assert.equal(isMobileV1(null), false)
-})
-
-test('the target line says what an effect would act on', () => {
+test('the target line says what a tool would act on', () => {
   assert.equal(targetLine(null, false), 'No file open')
   assert.equal(targetLine(null, true), 'Nothing selected')
   assert.equal(targetLine({ start: 1, end: 13.54 }, true), 'Selection · 12.54 s')

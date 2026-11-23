@@ -15,6 +15,7 @@ import { useFileSave } from './useFileSave.js'
 import { useWindows } from './useWindows.js'
 import { installPerFilePluginSettings } from './perFilePluginSettings.js'
 import { useMobileSheets } from './useMobileSheets.js'
+import { useFormFactor } from './useFormFactor.js'
 import { requestTogglePlayback } from '../ui/transportBus.js'
 
 export function installEditorShell() {
@@ -30,7 +31,8 @@ export function installEditorShell() {
   const { promptForFiles } = useFileImport()
   const { saveDocument, saveDocumentAs } = useFileSave()
   const { closeTopWindow, anyWindowOpen } = useWindows()
-  const { fileSheetOpen, closeFileSheet } = useMobileSheets()
+  const { fileSheetOpen, closeFileSheet, effectsMenuOpen, closeEffectsMenu } = useMobileSheets()
+  const { layout } = useFormFactor()
 
   const NUDGE_SECONDS = 1
   const NUDGE_SECONDS_COARSE = 5
@@ -46,7 +48,10 @@ export function installEditorShell() {
   function closeTopModal() {
     if (appState.contextMenu) { closeContextMenu(); return true }
     if (appState.commandPaletteOpen) { closeCommandPalette(); return true }
-    // The phone's file switcher sits above the plugin windows.
+    // The phone's Effects menu and file switcher sit above the plugin windows.
+    // The menu catches its own Escape while focus is in it; on a phone it
+    // opens without focus, so the ladder closes it too.
+    if (effectsMenuOpen.value) { closeEffectsMenu(); return true }
     if (fileSheetOpen.value) { closeFileSheet(); return true }
     if (closeTopWindow()) return true
     if (appState.saveDialog) { appState.saveDialog = null; return true }
@@ -61,11 +66,14 @@ export function installEditorShell() {
     const inText = isTextField(e.target)
     const modalOpen = anyWindowOpen.value || appState.commandPaletteOpen ||
       appState.contextMenu || appState.filesPanelOpen ||
-      appState.saveDialog
+      appState.saveDialog || effectsMenuOpen.value
 
     // Escape — close the top modal, then the selection, then the rail.
     if (e.key === 'Escape') {
       if (closeTopModal()) { e.preventDefault(); return }
+      // The phone's tool sheet (a rail view) covers the waveform, so it is the
+      // top thing on screen: it closes before the selection it acts on clears.
+      if (layout.value === 'mobile' && state.railOperation) { closeRail(); e.preventDefault(); return }
       if (hasSelection.value) { clearSelection(); e.preventDefault(); return }
       if (state.activeTool) { closeRail(); e.preventDefault() }
       return

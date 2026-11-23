@@ -2,19 +2,31 @@ import { ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 
 /**
- * The mobile shell's file switcher is a sheet of its own, not a rail
- * category, so its open state lives here. One sheet at a time: opening the
- * switcher closes a category's effect list, and the shell closes the switcher
- * when a category opens (MobileEditorScreen).
+ * The mobile shell's file switcher and Effects menu are its own, not rail
+ * categories, so their open state lives here. One at a time: opening either
+ * closes the other and any tool sheet (a rail view such as Fade), and the
+ * shell closes both when a tool sheet opens (MobileEditorScreen).
  */
 const fileSheetOpen = ref(false)
+const effectsMenuOpen = ref(false)
 
 export function useMobileSheets() {
   const { closeRail } = useEditorState()
 
   function openFileSheet() {
     closeRail()
+    effectsMenuOpen.value = false
     fileSheetOpen.value = true
+  }
+
+  function openEffectsMenu() {
+    closeRail()
+    fileSheetOpen.value = false
+    effectsMenuOpen.value = true
+  }
+
+  function closeEffectsMenu() {
+    effectsMenuOpen.value = false
   }
 
   function closeFileSheet() {
@@ -26,7 +38,10 @@ export function useMobileSheets() {
     else openFileSheet()
   }
 
-  return { fileSheetOpen, openFileSheet, closeFileSheet, toggleFileSheet }
+  return {
+    fileSheetOpen, openFileSheet, closeFileSheet, toggleFileSheet,
+    effectsMenuOpen, openEffectsMenu, closeEffectsMenu,
+  }
 }
 
 /** How far the handle must be dragged down before a sheet closes, px. */

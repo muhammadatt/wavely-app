@@ -1,65 +1,46 @@
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
-import { useEditorState } from '../composables/useEditorState.js'
-import { useBilling } from '../composables/useBilling.js'
-import { useAccountScreen } from '../composables/useAccountScreen.js'
+import { useAccountActions } from '../composables/useAccountActions.js'
 import BaseButton from './ui/BaseButton.vue'
 import Icon from './ui/Icon.vue'
-import { subscriptionLine as subscriptionLineFor } from '../auth/accountSummary.js'
 
 /**
  * Top-bar account control. Renders nothing at all when accounts are off, so a
- * build without Supabase configured looks exactly as it did before.
+ * build without Supabase configured looks exactly as it did before. What it
+ * shows and does is useAccountActions, shared with the phone's ⋯ menu.
  */
 const auth = useAuth()
-const { state, user, plan } = auth
+const { state, user } = auth
+const account = useAccountActions()
+const { displayName, initial, planLabel, isPaid, pastDue, subscriptionLine } = account
 
 const open = ref(false)
-
-const PLAN_LABELS = { free: 'Free', pro: 'Pro' }
-
-const displayName = computed(() => state.account?.user?.displayName || user.value?.email || '')
-const initial = computed(() => (displayName.value.trim()[0] ?? '?').toUpperCase())
-const planLabel = computed(() => PLAN_LABELS[plan.value] ?? plan.value ?? '')
-const isPaid = computed(() => !!plan.value && plan.value !== 'free')
 
 function onWindowClick(e) {
   if (!e.target.closest?.('[data-account-menu]')) open.value = false
 }
-
 onMounted(() => window.addEventListener('click', onWindowClick))
 onUnmounted(() => window.removeEventListener('click', onWindowClick))
 
-const { showToast } = useEditorState()
-const billing = useBilling()
-const accountScreen = useAccountScreen()
-const pastDue = computed(() => state.account?.subscription?.status === 'past_due')
-
-/** "Renews 21 Nov 2026" / "Ends 21 Nov 2026" / "Payment failed — update your card". */
-const subscriptionLine = computed(() => subscriptionLineFor(state.account?.subscription))
-
 function upgrade() {
   open.value = false
-  auth.openUpgrade()
+  account.upgrade()
 }
 
 function openAccount(section = 'overview') {
   open.value = false
-  accountScreen.open(section)
+  account.openAccount(section)
 }
 
-async function manageBilling() {
+function manageBilling() {
   open.value = false
-  const { error } = await billing.manage()
-  if (error) showToast(error, 5000)
+  account.manageBilling()
 }
 
-async function signOut() {
+function signOut() {
   open.value = false
-  const { error } = await auth.signOut()
-  // Still signed in — say so rather than leaving the menu looking unchanged.
-  if (error) showToast(`Couldn’t sign out: ${error}`, 5000)
+  account.signOut()
 }
 </script>
 

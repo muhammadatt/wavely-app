@@ -22,6 +22,12 @@ import { useEditorState } from '../composables/useEditorState.js'
  * position, so it cannot disagree with the viewport.
  */
 
+// `collapse` (the phone): with nothing to scroll the rail shrinks to a hairline
+// rather than keeping its touch-sized height — an empty 22 px band under the
+// waveform. It grows back once a pinch zooms in. The desktop keeps the rail's
+// height so zooming never moves the waveform under the mouse.
+const props = defineProps({ collapse: { type: Boolean, default: false } })
+
 const { totalDuration } = useEditorState()
 
 const track = ref(null)
@@ -159,7 +165,7 @@ onUnmounted(() => {
   <div
     ref="track"
     class="wf-track relative h-[11px] shrink-0 select-none border-t border-[rgba(255,255,255,.05)]"
-    :class="scrollable ? 'cursor-pointer' : ''"
+    :class="[scrollable ? 'cursor-pointer' : '', { 'is-collapsed': props.collapse && !scrollable }]"
     style="background:rgba(255,255,255,.02)"
     @pointerdown="onTrackPointerDown"
   >
@@ -180,6 +186,7 @@ onUnmounted(() => {
 @media (pointer: coarse) {
   .wf-track { height: 22px; }
 }
+.wf-track.is-collapsed { height: 4px; }
 .wf-thumb {
   background: rgba(126, 240, 255, 0.28);
   transition: background-color 0.15s ease;
