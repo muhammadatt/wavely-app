@@ -22,9 +22,9 @@ import { useEditorState } from '../composables/useEditorState.js'
  * position, so it cannot disagree with the viewport.
  */
 
-// `collapse` (the phone): with nothing to scroll the rail shrinks to a hairline
-// rather than keeping its touch-sized height — an empty 22 px band under the
-// waveform. It grows back once a pinch zooms in. The desktop keeps the rail's
+// `collapse` (the phone): with nothing to scroll the rail collapses to nothing
+// (no height, no border) rather than keeping its touch-sized height — an empty
+// 22 px band under the waveform. It grows back once a pinch zooms in. The desktop keeps the rail's
 // height so zooming never moves the waveform under the mouse.
 const props = defineProps({ collapse: { type: Boolean, default: false } })
 

@@ -721,7 +721,7 @@ try {
       if (!/WAV/.test(await pp.locator('[data-testid=mobile-file-switcher]').innerText())) why.push('the header does not show the file; ')
       // Idle: ONE selection bar, as on the desktop — the buttons that need a
       // selection are disabled, Select all and Split are not; the empty
-      // scrollbar rail is a hairline, and the total has centiseconds.
+      // scrollbar rail is collapsed, and the total has centiseconds.
       const idleBar = pp.locator('[data-testid=mobile-selection-bar]')
       const dis = n => idleBar.getByRole('button', { name: n, exact: true }).isDisabled()
       if (!(await dis('Cut')) || !(await dis('Trim')) || await dis('Split') || await pp.locator('[data-testid=mobile-select-all]').isDisabled()) why.push('the idle selection bar does not disable exactly what needs a selection; ')
@@ -852,7 +852,7 @@ try {
       if (!chain.isSheet || !chain.applyOnScreen) why.push('the chain did not open as a sheet with Apply on screen; ')
       await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
 
-      // The file switcher: Open audio from the sheet adds a file; a row's tap
+      // The file switcher: Add audio from the sheet adds a file; a row's tap
       // switches; Rename and Close are labelled buttons behind its ⋯.
       const fileSheet = pp.locator('[data-testid=mobile-file-sheet]')
       const fileRows = fileSheet.locator('.m-file-go')

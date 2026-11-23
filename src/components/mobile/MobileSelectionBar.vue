@@ -4,31 +4,39 @@ import { useSelectionActions } from '../../composables/useSelectionActions.js'
 import Icon from '../ui/Icon.vue'
 
 /**
- * The selection's readout and its actions, in place of the desktop's
- * right-click menu. Always shown with a file. With nothing selected it is ONE
- * row of what works then — Select all, Paste (when there is something to
- * paste), Split at the playhead — and with a selection, the edges and every
- * action (design "small fixes" #3, November 2026). Split cuts at the
- * selection's edges when there is one, else at the playhead.
- *
- * Each edge's time sits between ‹ › nudge buttons: a tap moves that edge one
- * step (about 3 px at the current zoom, a round number — finer when zoomed
- * in), and holding repeats, for the precision a finger cannot reach. A
- * looping selection follows the nudge as it plays.
+ * The selection's actions, in place of the desktop's right-click menu. Always
+ * shown with a file, as one row: every button is drawn and the ones that need
+ * a selection are disabled without one. The first button toggles — Select
+ * (all) with nothing selected, Clear with a selection — since there is no ✕.
+ * Paste (with something on the clipboard) and Split work either way; Split
+ * cuts at the selection's edges when there is one, else at the playhead.
+ * The edges and their nudges live in MobileSelectionReadout.
  */
-const { state, hasClipboard, selectAll } = useEditorState()
+const { state, hasClipboard, selectAll, clearSelection } = useEditorState()
 const { busy, cut, copy, paste, silence, trim, split } = useSelectionActions()
-
 </script>
 
 <template>
-  <!-- ONE bar, as on the desktop: every button is always drawn and the ones
-       that need a selection are disabled without one. Select all, Paste (with
-       something on the clipboard) and Split (at the playhead when nothing is
-       selected, else at the selection's edges) work either way. -->
+  <!-- ONE bar, as on the desktop: see the header comment. -->
   <div class="m-sel" data-testid="mobile-selection-bar">
     <div class="m-sel-actions">
-      <button type="button" class="m-act" :disabled="busy" title="Select all" data-testid="mobile-select-all" @click="selectAll"><Icon name="selectAll" :size="17" />Select</button>
+      <button
+        v-if="state.selection"
+        type="button"
+        class="m-act"
+        title="Clear the selection"
+        data-testid="mobile-clear-selection"
+        @click="clearSelection"
+      ><Icon name="deselect" :size="17" />Clear</button>
+      <button
+        v-else
+        type="button"
+        class="m-act"
+        :disabled="busy"
+        title="Select all"
+        data-testid="mobile-select-all"
+        @click="selectAll"
+      ><Icon name="selectAll" :size="17" />Select</button>
       <button type="button" class="m-act" :disabled="!state.selection || busy" @click="cut"><Icon name="cut" :size="17" />Cut</button>
       <button type="button" class="m-act" :disabled="!state.selection" @click="copy"><Icon name="copy" :size="17" />Copy</button>
       <button type="button" class="m-act" :disabled="!hasClipboard || busy" @click="paste"><Icon name="paste" :size="17" />Paste</button>
@@ -48,13 +56,13 @@ const { busy, cut, copy, paste, silence, trim, split } = useSelectionActions()
 
 <style scoped>
 .m-sel {
-  background: #01070b; /* #0f1316; */
+  background: var(--mob-bar-bg);
   flex-shrink: 0;
   padding: 6px 8px 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  border-top: 1px solid #1b2229;
+  border-top: 1px solid var(--mob-bar-border);
 }
 .m-sel-actions { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
 .m-act {
@@ -66,12 +74,12 @@ const { busy, cut, copy, paste, silence, trim, split } = useSelectionActions()
   border: none;
   border-radius: 10px;
   color: #eaf6f8;
-  background: rgba(53,211,230,.12);
+  background: var(--mob-accent-wash);
   font: 600 10.5px 'Inter', sans-serif;
 }
 .m-act:disabled { opacity: .35; }
 
-/* On its side: one row, the readout then the actions as icons. */
+/* On its side: the actions as one row of icons. */
 @media (max-height: 500px) {
   .m-sel { flex-direction: row; align-items: center; padding: 4px 8px; gap: 8px; }
   .m-sel-actions { display: flex; gap: 4px; }

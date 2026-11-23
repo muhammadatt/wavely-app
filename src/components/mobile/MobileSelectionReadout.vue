@@ -4,9 +4,11 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { useSelectionActions } from '../../composables/useSelectionActions.js'
 
 /**
- * The selection's edges, length and nudges: a strip in the waveform area,
- * above the scrollbar, always drawn (the buttons are disabled with nothing
- * selected). It used to be the top row of MobileSelectionBar.
+ * The selection's edges, length and nudges: a strip meant for the waveform
+ * area, above the scrollbar (not mounted yet — it did not fit the phone
+ * layout). The nudge buttons are disabled with nothing selected, and the
+ * edge times appear with a selection. It used to be the top row of
+ * MobileSelectionBar.
  *
  * Each edge's time sits between ‹ › nudge buttons: a tap moves that edge one
  * step (about 3 px at the current zoom, a round number — finer when zoomed
@@ -60,7 +62,6 @@ onBeforeUnmount(stopHold)
 
 <template>
   <div class="m-sel-row" data-testid="mobile-selection-readout">
-  <div class="m-sel-row">
     <div v-for="edge in ['start', 'end']" :key="edge" class="m-edge" :class="`m-edge-${edge}`">
       <button
         type="button"
@@ -74,7 +75,7 @@ onBeforeUnmount(stopHold)
         @pointercancel="stopHold"
         @click="keyNudge($event, edge, -1)"
       >‹</button>
-      <span v-if="readout" class="m-edge-time" :class="{ 'm-dim': !readout }" :data-testid="`edge-${edge}`">{{ readout ? readout[edge] : '–:––.––' }}</span>
+      <span v-if="readout" class="m-edge-time" :data-testid="`edge-${edge}`">{{ readout[edge] }}</span>
       <button
         type="button"
         class="m-nudge"
@@ -90,16 +91,17 @@ onBeforeUnmount(stopHold)
     </div>
     <span class="m-sel-len" :class="{ 'm-dim': !readout }">{{ readout ? readout.length : 'No selection' }}</span>
   </div>
-  </div>
 </template>
 
 <style scoped>
 .m-sel-row {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 2px;
+  padding: 4px 10px;
   min-height: 30px;
+  background: var(--mob-bar-bg);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
 }
@@ -124,14 +126,4 @@ onBeforeUnmount(stopHold)
 .m-dim { color: rgba(255,255,255,.45) !important; }
 .m-nudge:active { background: rgba(232,163,61,.2); }
 .m-sel-len { order: 1; flex: 1; text-align: center; font-size: 11px; color: #e8a33d; }
-.m-sel-x { order: 3; }
-.m-sel-x {
-  margin-left: auto;
-  border: none;
-  background: rgba(255,255,255,.06);
-  color: rgba(255,255,255,.7);
-  border-radius: 8px;
-}
-.m-sel-x { width: 26px; height: 26px; display: grid; place-items: center; }
-.m-sel-row { flex-shrink: 0; padding: 4px 10px; background: #01070b; }
 </style>

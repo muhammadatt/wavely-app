@@ -63,7 +63,6 @@ const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspac
         <WaveformOverview class="m-overview" />
         <div class="m-wave">
           <WaveformArea />
-
           <WaveformScrollbar collapse />
           <ProcessingOverlay v-if="state.isProcessing" />
         </div>

@@ -129,7 +129,7 @@ function run(action) {
           <span v-if="account.pastDue.value" class="m-dot is-warn" aria-hidden="true" />
         </button>
         <div v-if="menuOpen" class="m-menu" role="menu">
-          <button type="button" role="menuitem" @click="run(promptForFiles)">Open audio…</button>
+          <button type="button" role="menuitem" @click="run(promptForFiles)">Add audio…</button>
           <button v-if="fileCount" type="button" role="menuitem" @click="run(openFileSheet)">All files</button>
           <button v-if="hasFile" type="button" role="menuitem" @click="run(() => saveDocumentAs())">Save as…</button>
           <template v-if="accountsOn">

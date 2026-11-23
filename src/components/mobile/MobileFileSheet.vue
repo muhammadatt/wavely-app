@@ -20,7 +20,7 @@ import Icon from '../ui/Icon.vue'
  * ONLY gesture. Everything else a file can do — Save, Save as, Rename, Close —
  * is a labelled button behind the row's ⋯, never a double-tap or a swipe (the
  * desktop Files panel shipped three bugs from hidden gestures). Rename is an
- * inline field with its own Done. Open audio adds files; "Export several"
+ * inline field with its own Done. Add audio adds files; "Export several"
  * hands over to the Files panel, which is still the one export surface.
  */
 const {

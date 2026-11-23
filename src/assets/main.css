@@ -87,6 +87,15 @@
   --z-toast: 800;
 }
 
+/* The phone shell's surfaces (components/mobile/*), shared so the bars agree. */
+:root {
+  --mob-bar-bg: #01070b;                         /* selection bar, tab bar */
+  --mob-bar-border: #1b2229;
+  --mob-btn-bg: rgb(22 27 35);                   /* a resting bar button */
+  --mob-accent-wash: rgba(53, 211, 230, .12);    /* a lit / tinted button */
+  --mob-transport-bg: linear-gradient(#1a2029, #12161d);
+}
+
 /* An editor, not a document: a phone's pull-to-refresh would reload the page
    and lose unsaved work, and a horizontal overscroll can navigate back. Every
    drag in the app is its own, so the page itself never needs to overscroll. */

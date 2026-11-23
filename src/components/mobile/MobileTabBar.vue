@@ -76,8 +76,7 @@ function openChain() {
   flex-shrink: 0;
   padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid rgba(255,255,255,.06);
-  background: #01070b;
-
+  background: var(--mob-bar-bg);
 }
 .m-tab {
   flex: 1;
@@ -89,11 +88,11 @@ function openChain() {
   height: 46px;
   border: none;
   border-radius: 12px;
-  background: rgb(22 27 35);
+  background: var(--mob-btn-bg);
   color: rgba(255,255,255,.8);
   font: 700 14px 'Inter', sans-serif;
 }
-.m-tab.is-on { color: #7fe9f6; background: rgba(53,211,230,.12); }
+.m-tab.is-on { color: #7fe9f6; background: var(--mob-accent-wash); }
 .m-tab:disabled { opacity: .35; }
 .m-chain-ic { color: #2fd3bf; }
 .m-chain.is-on .m-chain-ic { color: #7fe9f6; }
