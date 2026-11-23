@@ -54,7 +54,7 @@ const playLabel = computed(() => state.isPlaying ? 'Stop' : hasSelection.value ?
       aria-label="Loop"
       @click="toggleLoop"
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 014-4h14M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 01-4 4H3" /></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-repeat-2 preview-icon"><path d="m2 9 3-3 3 3"/><path d="M13 18H7a2 2 0 0 1-2-2V6"/><path d="m22 15-3 3-3-3"/><path d="M11 6h6a2 2 0 0 1 2 2v10"/></svg>
       <span>Loop</span>
     </button>
   </div>
@@ -69,7 +69,7 @@ const playLabel = computed(() => state.isPlaying ? 'Stop' : hasSelection.value ?
   padding: 8px 14px;
   flex-shrink: 0;
   border-top: 1px solid rgba(255,255,255,.06);
-  background: linear-gradient(180deg, #12161b, #0d1013);
+  background: linear-gradient(#1a2029, #12161d);
 }
 .m-clock { display: flex; flex-direction: column; font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 .m-clock-main { font-size: 19px; font-weight: 700; color: #eaf6f8; }
@@ -96,14 +96,14 @@ const playLabel = computed(() => state.isPlaying ? 'Stop' : hasSelection.value ?
 .m-loop {
   justify-self: end;
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 6px 8px; border-radius: 10px;
+  padding: 7px 11px; 
+  border-radius: 10px;
   border: none; background: none;
   color: rgba(255,255,255,.55);
   font: 600 9.5px 'Inter', sans-serif;
 }
 .m-loop svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.m-loop.is-on { color: #7fe9f6; background: rgba(53,211,230,.12); }
-
+.m-loop.is-on { color: #eaf6f8; background: rgba(53,211,230,.12); }
 @media (max-height: 500px) {
   .m-transport { padding: 4px 14px; }
   .m-play { width: 44px; height: 44px; }

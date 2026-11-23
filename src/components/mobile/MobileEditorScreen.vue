@@ -4,6 +4,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { installEditorShell, useWorkspaceDrop } from '../../composables/editorShell.js'
 import MobileTopBar from './MobileTopBar.vue'
 import MobileSelectionBar from './MobileSelectionBar.vue'
+import MobileSelectionReadout from './MobileSelectionReadout.vue'
 import MobileTransport from './MobileTransport.vue'
 import MobileTabBar from './MobileTabBar.vue'
 import WaveformOverview from '../WaveformOverview.vue'
@@ -62,6 +63,7 @@ const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspac
         <WaveformOverview class="m-overview" />
         <div class="m-wave">
           <WaveformArea />
+
           <WaveformScrollbar collapse />
           <ProcessingOverlay v-if="state.isProcessing" />
         </div>

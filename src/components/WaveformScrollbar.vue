@@ -186,7 +186,7 @@ onUnmounted(() => {
 @media (pointer: coarse) {
   .wf-track { height: 22px; }
 }
-.wf-track.is-collapsed { height: 4px; }
+.wf-track.is-collapsed { height: 0; border-top-width: 0; }
 .wf-thumb {
   background: rgba(126, 240, 255, 0.28);
   transition: background-color 0.15s ease;

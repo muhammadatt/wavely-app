@@ -719,12 +719,14 @@ try {
       await (await chooserP).setFiles(wav)
       await pp.waitForTimeout(3000)
       if (!/WAV/.test(await pp.locator('[data-testid=mobile-file-switcher]').innerText())) why.push('the header does not show the file; ')
-      // Idle: the selection bar is one row of what works with nothing selected,
-      // the empty scrollbar rail is a hairline, and the total has centiseconds.
-      const idle = await pp.locator('[data-testid=mobile-selection-bar]').innerText()
-      if (/\bCut\b/.test(idle) || !/Split/.test(idle) || !/Select all/.test(idle)) why.push(`the idle selection bar is not one row of Select all / Split (${idle.replace(/\s+/g, ' ')}); `)
+      // Idle: ONE selection bar, as on the desktop — the buttons that need a
+      // selection are disabled, Select all and Split are not; the empty
+      // scrollbar rail is a hairline, and the total has centiseconds.
+      const idleBar = pp.locator('[data-testid=mobile-selection-bar]')
+      const dis = n => idleBar.getByRole('button', { name: n, exact: true }).isDisabled()
+      if (!(await dis('Cut')) || !(await dis('Trim')) || await dis('Split') || await pp.locator('[data-testid=mobile-select-all]').isDisabled()) why.push('the idle selection bar does not disable exactly what needs a selection; ')
       const railH = await pp.evaluate(() => document.querySelector('.wf-track')?.getBoundingClientRect().height ?? -1)
-      if (!(railH > 0 && railH <= 5)) why.push(`the unscrollable rail is ${railH}px, not a hairline; `)
+      if (!(railH >= 0 && railH <= 5)) why.push(`the unscrollable rail is ${railH}px, not collapsed; `)
       if (!/of \d+:\d\d\.\d\d/.test(await pp.locator('[data-testid=mobile-total]').innerText())) why.push('the total has no centiseconds; ')
 
       const cdp = await phone.newCDPSession(pp)
@@ -748,13 +750,13 @@ try {
       await pp.waitForTimeout(300)
       if (await loupe.count()) why.push('the magnifier stayed up after the finger lifted; ')
       const bar = pp.locator('[data-testid=mobile-selection-bar]')
-      if (!/\d:\d\d\.\d\d/.test(await bar.locator('[data-testid=edge-start]').innerText().catch(() => ''))) why.push('a touch drag did not show the selection bar; ')
+      if (!/\d:\d\d\.\d\d/.test(await pp.locator('[data-testid=edge-start]').innerText().catch(() => ''))) why.push('a touch drag did not show the selection bar; ')
 
       // A tap on a nudge button moves that edge one step, and only that edge.
       const sel = () => pp.evaluate(async () =>
         ({ ...(await import('/src/composables/useEditorState.js')).useEditorState().state.selection }))
       const s0 = await sel()
-      await bar.locator('[data-testid=nudge-start-fwd]').tap()
+      await pp.locator('[data-testid=nudge-start-fwd]').tap()
       await pp.waitForTimeout(150)
       const s1 = await sel()
       if (!(s1.start > s0.start && s1.end === s0.end)) why.push('a nudge did not move the start edge alone; ')

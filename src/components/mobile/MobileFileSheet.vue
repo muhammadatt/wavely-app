@@ -187,7 +187,7 @@ function exportSeveral() {
 
     <footer class="m-files-foot">
       <button type="button" class="m-files-open" data-testid="mobile-file-open" @click="openAudio">
-        <Icon name="plus" :size="15" :stroke-width="2.5" />Open audio
+        <Icon name="plus" :size="15" :stroke-width="2.5" />Add audio
       </button>
       <button v-if="documents.length > 1" type="button" class="m-files-export" @click="exportSeveral">
         Export several…

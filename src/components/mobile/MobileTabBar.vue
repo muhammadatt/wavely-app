@@ -76,7 +76,8 @@ function openChain() {
   flex-shrink: 0;
   padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid rgba(255,255,255,.06);
-  background: #0b0e11;
+  background: #01070b;
+
 }
 .m-tab {
   flex: 1;
@@ -88,7 +89,7 @@ function openChain() {
   height: 46px;
   border: none;
   border-radius: 12px;
-  background: rgba(255,255,255,.05);
+  background: rgb(22 27 35);
   color: rgba(255,255,255,.8);
   font: 700 14px 'Inter', sans-serif;
 }
