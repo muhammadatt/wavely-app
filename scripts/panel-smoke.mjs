@@ -790,6 +790,12 @@ try {
       if (!(await row('Loudness Normalize').count()) || (await row('LA Classic 76').count())) why.push('searching did not narrow the menu; ')
       await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
       if (await menu.count()) why.push('Escape did not close the menu; ')
+      // …and a phone, with no Escape key, closes it from its ✕.
+      await pp.locator('[data-testid=mobile-effects]').click()
+      await pp.waitForTimeout(300)
+      await menu.locator('[data-testid=picker-close]').click()
+      await pp.waitForTimeout(300)
+      if (await menu.count()) why.push('the menu\'s close button did not close it; ')
 
       // A rail view opens in the tool sheet, whose back returns to the menu.
       const tool = pp.locator('[data-testid=mobile-tool-sheet]')

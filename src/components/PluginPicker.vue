@@ -137,6 +137,15 @@ function onEscape(e) {
           @keydown="onKeydown"
         />
         <kbd class="compact:hidden font-mono text-[9.5px] font-bold px-[6px] py-[3px] rounded-[5px] text-text-faint" style="background:rgba(255,255,255,.06)">ESC</kbd>
+        <!-- On a phone the list fills the screen, leaving almost no backdrop
+             to tap and no Escape key: a close button stands in for the hint. -->
+        <button
+          type="button"
+          class="picker-close hidden compact:grid"
+          aria-label="Close"
+          data-testid="picker-close"
+          @click="emit('close')"
+        ><Icon name="close" :size="13" :stroke-width="2.5" /></button>
       </div>
 
       <!-- On a phone the list takes the screen's height (see the CSS). -->
@@ -222,6 +231,17 @@ section + section .picker-group {
 
 @media (max-height: 520px), (max-width: 640px) {
   .picker-list { max-height: calc(100dvh - 76px); }
+}
+
+.picker-close {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .picker-member {
