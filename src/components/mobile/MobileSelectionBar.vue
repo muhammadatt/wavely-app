@@ -6,8 +6,9 @@ import Icon from '../ui/Icon.vue'
 
 /**
  * The selection's readout and its actions, in place of the desktop's
- * right-click menu. Shown while there is a selection, or something on the
- * clipboard to paste at the playhead.
+ * right-click menu. Always shown with a file: Split (at the playhead) and
+ * Paste work with nothing selected. Split cuts at the selection's edges when
+ * there is one, else at the playhead.
  *
  * Each edge's time sits between ‹ › nudge buttons: a tap moves that edge one
  * step (about 3 px at the current zoom, a round number — finer when zoomed
@@ -15,7 +16,7 @@ import Icon from '../ui/Icon.vue'
  * looping selection follows the nudge as it plays.
  */
 const { state, hasSelection, hasClipboard, clearSelection, selectAll } = useEditorState()
-const { busy, cut, copy, paste, silence, trim, nudge, nudgeSeconds } = useSelectionActions()
+const { busy, cut, copy, paste, silence, trim, split, nudge, nudgeSeconds } = useSelectionActions()
 
 // Milliseconds once the step is finer than 10 ms, so a nudge always shows.
 const decimals = computed(() => (nudgeSeconds.value < 0.01 ? 3 : 2))
@@ -104,6 +105,14 @@ onBeforeUnmount(stopHold)
       <button type="button" class="m-act" :disabled="!hasClipboard || busy" @click="paste"><Icon name="paste" :size="17" />Paste</button>
       <button type="button" class="m-act" :disabled="!hasSelection || busy" @click="silence"><Icon name="silence" :size="17" />Silence</button>
       <button type="button" class="m-act" :disabled="!hasSelection || busy" @click="trim"><Icon name="trim" :size="17" />Trim</button>
+      <button
+        type="button"
+        class="m-act"
+        :disabled="busy"
+        :title="hasSelection ? 'Split at the selection\'s edges' : 'Split at the playhead'"
+        data-testid="mobile-split"
+        @click="split"
+      ><Icon name="split" :size="17" />Split</button>
     </div>
   </div>
 </template>
@@ -157,7 +166,7 @@ onBeforeUnmount(stopHold)
 }
 .m-sel-x { width: 26px; height: 26px; display: grid; place-items: center; }
 .m-sel-all { padding: 5px 10px; font: 600 12px 'Inter', sans-serif; }
-.m-sel-actions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.m-sel-actions { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
 .m-act {
   display: flex;
   flex-direction: column;

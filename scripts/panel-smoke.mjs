@@ -767,34 +767,53 @@ try {
       if (!menuOpened) why.push('long press did not open the menu; ')
       await pp.keyboard.press('Escape')
 
-      // A category tab opens its effect list as a sheet: the v1 effects first,
-      // the rest behind More; a window opened from it takes the screen and
-      // closes the list; tapping the tab again closes it.
-      const sheet = pp.locator('[data-testid=mobile-effect-sheet]')
-      await pp.locator('[data-testid=mobile-tab-dynamics]').click()
-      await pp.waitForTimeout(500)
-      if (!(await sheet.count())) why.push('a category tab did not open its sheet; ')
-      if (!(await pp.locator('[data-testid=mobile-effect-opto-smooth]').count())) why.push('the sheet does not list LA Vintage 2A; ')
-      if (await pp.locator('[data-testid=mobile-effect-fet-punch]').count()) why.push('a non-v1 plugin shows before More is opened; ')
-      await pp.locator('[data-testid=mobile-effect-more]').click()
-      if (!(await pp.locator('[data-testid=mobile-effect-fet-punch]').count())) why.push('More did not show the rest; ')
-      await pp.locator('[data-testid=mobile-tab-dynamics]').click()
-      await pp.waitForTimeout(500)
-      if (await sheet.count()) why.push('tapping the tab again did not close the sheet; ')
-
-      await pp.locator('[data-testid=mobile-tab-level]').click()
+      // Effects opens ONE menu of every released effect (the chain's picker):
+      // a plugin outside the old v1 list is in it, the one-tap edits are not,
+      // and search narrows it.
+      const menu = pp.locator('[data-testid=mobile-effects-menu]')
+      const row = name => menu.locator('.picker-row').filter({ has: pp.locator(`text="${name}"`) })
+      await pp.locator('[data-testid=mobile-effects]').click()
       await pp.waitForTimeout(400)
-      // A rail view opens inside the sheet, with a way back.
-      await pp.locator('[data-testid=mobile-effect-fade]').click()
+      if (!(await menu.count())) why.push('Effects did not open the menu; ')
+      if (!(await row('LA Classic 76').count())) why.push('the menu does not list LA Classic 76; ')
+      if (!(await row('Split').count())) why.push('the menu does not list Split under Edit; ')
+      if (await row('Cut').count()) why.push('the menu lists Cut, which the selection bar holds; ')
+      await menu.locator('input').fill('loud')
+      await pp.waitForTimeout(150)
+      if (!(await row('Loudness Normalize').count()) || (await row('LA Classic 76').count())) why.push('searching did not narrow the menu; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+      if (await menu.count()) why.push('Escape did not close the menu; ')
+
+      // A rail view opens in the tool sheet, whose back returns to the menu.
+      const tool = pp.locator('[data-testid=mobile-tool-sheet]')
+      await pp.locator('[data-testid=mobile-effects]').click()
       await pp.waitForTimeout(300)
-      if (!(await pp.locator('[data-testid=mobile-effect-back]').count())) why.push('Fade did not open inside the sheet; ')
-      await pp.locator('[data-testid=mobile-effect-back]').click()
-      await pp.locator('[data-testid=mobile-effect-normalize]').click()
+      await row('Fade').click()
+      await pp.waitForTimeout(400)
+      if (!(await tool.count())) why.push('Fade did not open in the tool sheet; ')
+      if (await menu.count()) why.push('the menu stayed open over the tool sheet; ')
+      await pp.locator('[data-testid=mobile-tool-back]').click()
+      await pp.waitForTimeout(300)
+      if (!(await menu.count()) || (await tool.count())) why.push('back did not return to the menu; ')
+      // A plugin opens as a window sheet, and the menu closes.
+      await row('Peak Normalize').click()
       await pp.waitForTimeout(800)
       const win = await pp.evaluate(() => !!document.querySelector('.win-frame.is-sheet'))
       if (!win) why.push('Peak Normalize did not open as a window sheet; ')
-      if (await sheet.count()) why.push('the list stayed open under the window; ')
+      if (await menu.count()) why.push('the menu stayed open under the window; ')
       await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+
+      // Split in the selection bar: at the playhead with nothing selected.
+      const segCount = () => pp.evaluate(async () =>
+        (await import('/src/composables/useEditorState.js')).useEditorState().state.segments.length)
+      await pp.evaluate(async () => {
+        const s = (await import('/src/composables/useEditorState.js')).useEditorState()
+        s.clearSelection(); s.setPlayhead(0.5)
+      })
+      const beforeSplit = await segCount()
+      await pp.locator('[data-testid=mobile-split]').click()
+      await pp.waitForTimeout(200)
+      if ((await segCount()) !== beforeSplit + 1) why.push('Split did not split at the playhead; ')
 
       // The Plugin Chain opens as a sheet with Apply on screen.
       await pp.locator('[data-testid=mobile-tab-chain]').click()
@@ -866,12 +885,13 @@ try {
       await pp.keyboard.press('Escape'); await pp.waitForTimeout(350)
       if (await fileSheet.count()) why.push('Escape did not close the switcher over a window; ')
       await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
-      // A category tab takes over from the switcher.
-      await pp.locator('[data-testid=mobile-tab-edit]').click()
-      await pp.waitForTimeout(400)
-      if (await fileSheet.count()) why.push('opening a category left the switcher open; ')
-      await pp.locator('[data-testid=mobile-tab-edit]').click()
+      // The Effects menu takes over from the switcher.
+      await pp.locator('[data-testid=mobile-file-switcher]').click()
       await pp.waitForTimeout(300)
+      await pp.locator('[data-testid=mobile-effects]').click()
+      await pp.waitForTimeout(400)
+      if (await fileSheet.count()) why.push('opening the Effects menu left the switcher open; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
 
       // Play starts and stops the transport.
       await pp.locator('[data-testid=mobile-play]').click()

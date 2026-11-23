@@ -30,7 +30,7 @@ export function installEditorShell() {
   const { promptForFiles } = useFileImport()
   const { saveDocument, saveDocumentAs } = useFileSave()
   const { closeTopWindow, anyWindowOpen } = useWindows()
-  const { fileSheetOpen, closeFileSheet } = useMobileSheets()
+  const { fileSheetOpen, closeFileSheet, effectsMenuOpen, closeEffectsMenu } = useMobileSheets()
 
   const NUDGE_SECONDS = 1
   const NUDGE_SECONDS_COARSE = 5
@@ -46,7 +46,10 @@ export function installEditorShell() {
   function closeTopModal() {
     if (appState.contextMenu) { closeContextMenu(); return true }
     if (appState.commandPaletteOpen) { closeCommandPalette(); return true }
-    // The phone's file switcher sits above the plugin windows.
+    // The phone's Effects menu and file switcher sit above the plugin windows.
+    // The menu catches its own Escape while focus is in it; on a phone it
+    // opens without focus, so the ladder closes it too.
+    if (effectsMenuOpen.value) { closeEffectsMenu(); return true }
     if (fileSheetOpen.value) { closeFileSheet(); return true }
     if (closeTopWindow()) return true
     if (appState.saveDialog) { appState.saveDialog = null; return true }
@@ -61,7 +64,7 @@ export function installEditorShell() {
     const inText = isTextField(e.target)
     const modalOpen = anyWindowOpen.value || appState.commandPaletteOpen ||
       appState.contextMenu || appState.filesPanelOpen ||
-      appState.saveDialog
+      appState.saveDialog || effectsMenuOpen.value
 
     // Escape — close the top modal, then the selection, then the rail.
     if (e.key === 'Escape') {

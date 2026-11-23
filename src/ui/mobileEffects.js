@@ -1,64 +1,44 @@
 /**
- * Which effects the phone's effect-list sheet leads with (the mobile design,
- * decision Q5, November 2026): the edits, the level tools and a few plugins
- * chosen for v1. Everything else a category holds still opens — as its desktop
- * window, scaled to fit as a sheet — but sits behind a "More effects" fold, so
- * the list a phone user meets is the short one the v1 plugins were checked for.
+ * The phone's Effects menu (components/mobile/MobileEffectsMenu.vue): which
+ * operations it lists, and in what order its groups come.
  *
- * Plain data and a pure split, testable without the registry (which imports
+ * Every released effect is in it (owner, November 2026: the phone ships the
+ * desktop panels, scaled, so there is no reason to hold any back — the Plugin
+ * Chain already offers them all). The one-tap edit verbs (Cut, Copy, Paste,
+ * Select All, registry `surface: 'immediate'`) are left out: the selection
+ * bar holds them. Trim, Split and Silence stay, under Edit, for the choices
+ * their panels carry (trim before / after, split at the playhead or the
+ * selection's edges).
+ *
+ * Plain data and pure functions, testable without the registry (which imports
  * every panel's .vue file).
  */
 
-/** Registry ids shown first on a phone. Anything else in a category is "more". */
-export const MOBILE_V1_OPERATION_IDS = Object.freeze([
-  // Edit
-  'cut', 'copy', 'paste', 'select-all', 'trim', 'split', 'silence',
-  // Level
-  'normalize', 'loudness', 'fade', 'volume',
-  // Dynamics
-  'auto-leveler', 'opto-smooth', 'vox-pressor',
-  // Tone
-  'manual-eq',
-  // Fix
-  'noise-reduction', 'de-esser',
-])
-
-const V1 = new Set(MOBILE_V1_OPERATION_IDS)
-
 /**
- * Categories the phone shell has no tab for. Mastering presets are deferred
+ * Categories the phone has no menu group for. Mastering presets are deferred
  * (Master is dev-only on desktop too) and not part of mobile v1, dev builds
- * included: seven tabs do not fit a phone's width.
+ * included.
  */
 export const MOBILE_EXCLUDED_CATEGORIES = new Set(['master'])
 
-export function isMobileV1(op) {
-  return !!op && V1.has(op.id)
-}
+/** Group order in the menu: the effects first, the edits last. */
+export const MOBILE_MENU_CATEGORY_ORDER = ['level', 'dynamics', 'tone', 'clean', 'edit']
 
 /**
- * Split a category's grouped operations (registry `groupedOperations`) into
- * the v1 rows — groups kept, in registry order, empty groups dropped — and the
- * rest as one flat list.
- *
- * @param {{ group: string, operations: object[] }[]} groups
- * @returns {{ primary: { group: string, operations: object[] }[], more: object[] }}
+ * The operations the menu lists, from the registry's released `OPERATIONS`.
+ * @param {object[]} operations
  */
-export function splitForMobile(groups) {
-  const primary = []
-  const more = []
-  for (const g of groups) {
-    const ops = g.operations.filter(isMobileV1)
-    if (ops.length) primary.push({ group: g.group, operations: ops })
-    more.push(...g.operations.filter(op => !isMobileV1(op)))
-  }
-  return { primary, more }
+export function mobileMenuOperations(operations) {
+  return operations.filter(op =>
+    op.category
+    && !MOBILE_EXCLUDED_CATEGORIES.has(op.category)
+    && op.surface !== 'immediate')
 }
 
 /**
- * The sheet's target line: what an effect opened from it would act on. A
- * plugin's Apply runs on the selection, so with none the line says so (and
- * the sheet offers Select all beside it).
+ * The tool sheet's target line: what the panel open in it would act on. An
+ * Apply runs on the selection, so with none the line says so (and the sheet
+ * offers Select all beside it).
  *
  * @param {{ start: number, end: number } | null} selection
  * @param {boolean} hasFile

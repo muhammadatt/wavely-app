@@ -9,10 +9,10 @@ import MobileTabBar from './MobileTabBar.vue'
 import WaveformOverview from '../WaveformOverview.vue'
 import WaveformArea from '../WaveformArea.vue'
 import WaveformScrollbar from '../WaveformScrollbar.vue'
-import MobileEffectSheet from './MobileEffectSheet.vue'
+import MobileToolSheet from './MobileToolSheet.vue'
+import MobileEffectsMenu from './MobileEffectsMenu.vue'
 import MobileFileSheet from './MobileFileSheet.vue'
 import { useMobileSheets } from '../../composables/useMobileSheets.js'
-import { MOBILE_EXCLUDED_CATEGORIES } from '../../ui/mobileEffects.js'
 import EmptyState from '../EmptyState.vue'
 import ProcessingOverlay from '../ProcessingOverlay.vue'
 
@@ -22,20 +22,22 @@ import ProcessingOverlay from '../ProcessingOverlay.vue'
  * waveform, transport rules and plugin windows — so an edit here is the same
  * edit there. What differs is the layout: the file is a name with a switcher
  * instead of tabs, the waveform takes the height, the selection's actions sit
- * in a bar instead of a right-click menu, and the categories are bottom tabs
- * whose lists open as a sheet above the transport.
+ * in a bar instead of a right-click menu, and the toolbar's categories are
+ * ONE Effects menu (the chain's picker over every effect) from the bottom
+ * bar, beside Chain. A rail view opened from it (Trim, Split, Silence, Fade,
+ * Volume) is a tool sheet above the transport.
  *
  * Chosen at startup on a phone (ui/formFactor.js); "Use desktop layout" in the
  * ⋯ menu switches back.
  */
-const { state, hasFile, hasSelection, hasClipboard, closeRail } = useEditorState()
-const { fileSheetOpen, closeFileSheet } = useMobileSheets()
-// One sheet at a time: a category opening closes the file switcher. A
-// category this shell has no tab for (Master, open in the desktop layout
-// when the user switched) is closed rather than shown as an empty sheet.
-watch(() => state.activeTool, tool => {
-  if (MOBILE_EXCLUDED_CATEGORIES.has(tool)) { closeRail(); return }
-  if (tool) closeFileSheet()
+const { state, hasFile, closeRail } = useEditorState()
+const { fileSheetOpen, closeFileSheet, effectsMenuOpen, closeEffectsMenu } = useMobileSheets()
+// One sheet at a time: a tool opening closes the switcher and the menu. A
+// category list with no tool in it (the desktop rail, open when the user
+// switched layouts) has no place here and is closed.
+watch(() => [state.activeTool, state.railOperation], ([tool, op]) => {
+  if (tool && !op) { closeRail(); return }
+  if (op) { closeFileSheet(); closeEffectsMenu() }
 }, { immediate: true })
 installEditorShell()
 const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspaceDrop()
@@ -52,8 +54,9 @@ const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspac
   >
     <MobileTopBar />
 
-    <!-- Everything between the header and the transport. The category sheet
-         rises inside it, so the transport and the tabs stay in reach. -->
+    <!-- Everything between the header and the transport. The tool sheet and
+         the file switcher rise inside it, so the transport and the bottom
+         bar stay in reach. -->
     <div class="m-main">
       <template v-if="hasFile">
         <WaveformOverview class="m-overview" />
@@ -62,12 +65,14 @@ const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspac
           <WaveformScrollbar />
           <ProcessingOverlay v-if="state.isProcessing" />
         </div>
-        <MobileSelectionBar v-if="hasSelection || hasClipboard" />
+        <!-- Always there with a file: Split and Paste work at the playhead
+             with nothing selected. -->
+        <MobileSelectionBar />
       </template>
       <EmptyState v-else class="flex-1 min-h-0" />
 
       <Transition name="m-sheet">
-        <MobileEffectSheet v-if="state.activeTool" />
+        <MobileToolSheet v-if="state.railOperation" />
       </Transition>
       <Transition name="m-sheet">
         <MobileFileSheet v-if="fileSheetOpen && hasFile" />
@@ -76,6 +81,8 @@ const { isDragOver, onDragEnter, onDragOver, onDragLeave, onDrop } = useWorkspac
 
     <MobileTransport />
     <MobileTabBar />
+
+    <MobileEffectsMenu v-if="effectsMenuOpen && hasFile" />
 
     <div v-if="isDragOver" class="m-drop">Drop to open</div>
   </div>

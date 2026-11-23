@@ -1,5 +1,5 @@
 /**
- * The selection's quick actions — Cut, Copy, Paste, Silence, Trim — shared by
+ * The selection's quick actions — Cut, Copy, Paste, Silence, Trim, Split — shared by
  * the desktop SelectionBar and the mobile shell's action bar, so both run the
  * same operation with the same toast. Each is a no-op without its
  * precondition, and the toast fires only once the operation has run. Silence
@@ -25,7 +25,7 @@ if (typeof window !== 'undefined') {
 export function useSelectionActions() {
   const {
     state, hasSelection, hasClipboard, performCut, performCopy, performPaste, showToast,
-    totalDuration,
+    totalDuration, performSplit, performSplitAtSelectionEdges,
   } = useEditorState()
   const { dispatch } = useOperationDispatch()
 
@@ -57,6 +57,19 @@ export function useSelectionActions() {
     dispatch(getOperation('trim'), { quick: true })
   }
 
+  /**
+   * Split where the user is pointing: at both edges of the selection when
+   * there is one, else at the playhead — the Split panel's two modes, picked
+   * by what is on screen.
+   */
+  function split() {
+    if (hasSelection.value) {
+      if (performSplitAtSelectionEdges()) showToast('Split at selection edges')
+    } else if (performSplit()) {
+      showToast('Split at playhead')
+    }
+  }
+
   /** Seconds one nudge moves an edge: ~3 px at the current zoom, a round number. */
   const nudgeSeconds = computed(() => nudgeStep(viewPps.value))
 
@@ -66,5 +79,5 @@ export function useSelectionActions() {
     state.selection = nudgedSelection(state.selection, edge, direction * nudgeSeconds.value, totalDuration.value)
   }
 
-  return { busy, copy, cut, paste, silence, trim, nudge, nudgeSeconds }
+  return { busy, copy, cut, paste, silence, trim, split, nudge, nudgeSeconds }
 }

@@ -3,25 +3,24 @@ import { computed } from 'vue'
 import { useEditorState } from '../../composables/useEditorState.js'
 import { useWindows } from '../../composables/useWindows.js'
 import { usePluginChain } from '../../composables/usePluginChain.js'
-import { CATEGORIES } from '../../ui/registry.js'
 import { useMobileSheets } from '../../composables/useMobileSheets.js'
-import { MOBILE_EXCLUDED_CATEGORIES } from '../../ui/mobileEffects.js'
 import Icon from '../ui/Icon.vue'
 
 /**
- * The mobile shell's bottom tabs: the desktop toolbar's categories, then the
- * Plugin Chain in its teal. A category opens its list as a sheet above the
- * transport (tapping it again closes it); Chain opens the chain window.
+ * The mobile shell's bottom bar: Effects, which opens the one Effects menu
+ * (MobileEffectsMenu — every released effect, grouped and searchable), and
+ * the Plugin Chain in its teal. It replaced a tab per toolbar category, each
+ * opening its own list (owner, November 2026): one menu is as few taps, can
+ * be searched, and is the same picker the chain's + Add plugin uses.
  */
-const { state, setActiveTool, closeRail, hasFile } = useEditorState()
+const { state, closeRail, hasFile } = useEditorState()
 const { openWindow, isOpen } = useWindows()
 const { slots, liveSlots, bypassed, suspended } = usePluginChain()
-
-const { closeFileSheet } = useMobileSheets()
-
-const tabs = CATEGORIES.filter(c => !MOBILE_EXCLUDED_CATEGORIES.has(c.id))
+const { effectsMenuOpen, openEffectsMenu, closeFileSheet } = useMobileSheets()
 
 const chainActive = computed(() => liveSlots.value.length > 0 && !bypassed.value && !suspended.value)
+// Lit while the menu, or a tool opened from it, is up.
+const effectsOn = computed(() => effectsMenuOpen.value || !!state.railOperation)
 
 function openChain() {
   closeRail()
@@ -33,18 +32,16 @@ function openChain() {
 <template>
   <nav class="m-tabs" aria-label="Tools">
     <button
-      v-for="cat in tabs"
-      :key="cat.id"
       type="button"
-      class="m-tab"
-      :class="{ 'is-on': state.activeTool === cat.id }"
+      class="m-tab m-effects"
+      :class="{ 'is-on': effectsOn }"
       :disabled="!hasFile"
-      :aria-pressed="String(state.activeTool === cat.id)"
-      :data-testid="`mobile-tab-${cat.id}`"
-      @click="setActiveTool(cat.id)"
+      :aria-expanded="String(effectsMenuOpen)"
+      data-testid="mobile-effects"
+      @click="openEffectsMenu"
     >
-      <Icon :name="cat.icon" :size="18" />
-      <span>{{ cat.label }}</span>
+      <Icon name="effects" :size="18" />
+      <span>Effects</span>
     </button>
     <button
       type="button"
@@ -66,8 +63,9 @@ function openChain() {
 <style scoped>
 .m-tabs {
   display: flex;
+  gap: 8px;
   flex-shrink: 0;
-  padding: 6px 4px calc(8px + env(safe-area-inset-bottom, 0px));
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid rgba(255,255,255,.06);
   background: #0b0e11;
 }
@@ -75,17 +73,17 @@ function openChain() {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 4px 0;
+  justify-content: center;
+  gap: 8px;
+  height: 46px;
   border: none;
-  background: none;
-  color: rgba(255,255,255,.5);
-  font: 600 10px 'Inter', sans-serif;
+  border-radius: 12px;
+  background: rgba(255,255,255,.05);
+  color: rgba(255,255,255,.8);
+  font: 700 14px 'Inter', sans-serif;
 }
-.m-tab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.m-tab.is-on { color: #7fe9f6; }
+.m-tab.is-on { color: #7fe9f6; background: rgba(53,211,230,.12); }
 .m-tab:disabled { opacity: .35; }
 .m-chain { color: #eaf6f8; }
 .m-chain-ic {
@@ -93,7 +91,7 @@ function openChain() {
   display: grid;
   place-items: center;
   width: 30px;
-  height: 20px;
+  height: 22px;
   border-radius: 7px;
   background: #1fa9a0;
   color: #fff;
@@ -111,9 +109,9 @@ function openChain() {
 }
 .m-chain-ic i.is-live { background: #5df0b0; }
 
-/* On its side: icons only. */
+/* On its side: a slimmer bar. */
 @media (max-height: 500px) {
-  .m-tabs { padding-top: 4px; padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px)); }
-  .m-tab { font-size: 0; gap: 0; padding: 4px 0; }
+  .m-tabs { padding-top: 5px; padding-bottom: calc(5px + env(safe-area-inset-bottom, 0px)); }
+  .m-tab { height: 36px; font-size: 13px; }
 }
 </style>
