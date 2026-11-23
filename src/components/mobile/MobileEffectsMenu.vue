@@ -37,6 +37,7 @@ function pick(id) {
     :category-order="MOBILE_MENU_CATEGORY_ORDER"
     label="Effects"
     placeholder="Search effects…"
+    search-label="Search effects"
     icon="search"
     :autofocus="false"
     data-testid="mobile-effects-menu"

@@ -32,6 +32,8 @@ const props = defineProps({
   categoryOrder: { type: Array, default: null },
   label: { type: String, default: 'Add a plugin to the chain' },
   placeholder: { type: String, default: 'Add a plugin to the chain…' },
+  /** The search field's accessible name. */
+  searchLabel: { type: String, default: 'Search plugins' },
   icon: { type: String, default: 'chain' },
   /** Focus the search field on open. */
   autofocus: { type: Boolean, default: true },
@@ -133,7 +135,7 @@ function onEscape(e) {
           type="text"
           class="picker-input flex-1 bg-transparent border-none text-[14px] font-medium"
           :placeholder="placeholder"
-          aria-label="Search"
+          :aria-label="searchLabel"
           @keydown="onKeydown"
         />
         <kbd class="compact:hidden font-mono text-[9.5px] font-bold px-[6px] py-[3px] rounded-[5px] text-text-faint" style="background:rgba(255,255,255,.06)">ESC</kbd>

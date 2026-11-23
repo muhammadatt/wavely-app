@@ -815,6 +815,17 @@ try {
       if (!win) why.push('Peak Normalize did not open as a window sheet; ')
       if (await menu.count()) why.push('the menu stayed open under the window; ')
       await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+      // Escape closes the tool sheet before it clears the selection under it.
+      const selAll = pp.locator('[data-testid=mobile-select-all]')
+      if (await selAll.count()) await selAll.click()
+      await pp.locator('[data-testid=mobile-effects]').click()
+      await pp.waitForTimeout(300)
+      await row('Fade').click()
+      await pp.waitForTimeout(400)
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
+      if (await tool.count()) why.push('Escape left the tool sheet open; ')
+      if (!(await pp.locator('[data-testid=edge-start]').count())) why.push('Escape cleared the selection before closing the tool sheet; ')
+      await pp.keyboard.press('Escape'); await pp.waitForTimeout(300)
 
       // Split in the selection bar: at the playhead with nothing selected.
       const segCount = () => pp.evaluate(async () =>

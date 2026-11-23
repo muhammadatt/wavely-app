@@ -117,7 +117,7 @@ function run(action) {
         <button
           type="button"
           class="m-btn"
-          aria-label="More"
+          :aria-label="account.pastDue.value ? 'More — payment failed' : 'More'"
           title="More"
           :aria-expanded="String(menuOpen)"
           data-testid="mobile-more"
@@ -126,7 +126,7 @@ function run(action) {
           <svg viewBox="0 0 24 24" class="m-ico" aria-hidden="true"><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></svg>
           <!-- A failed payment can't hide in a menu: Pro lapses if the card
                isn't fixed. -->
-          <span v-if="account.pastDue.value" class="m-dot is-warn" aria-label="Payment failed" />
+          <span v-if="account.pastDue.value" class="m-dot is-warn" aria-hidden="true" />
         </button>
         <div v-if="menuOpen" class="m-menu" role="menu">
           <button type="button" role="menuitem" @click="run(promptForFiles)">Open audio…</button>
