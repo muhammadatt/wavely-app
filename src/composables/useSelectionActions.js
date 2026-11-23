@@ -76,7 +76,12 @@ export function useSelectionActions() {
   /** Move the selection's `edge` ('start' | 'end') one step, `direction` −1 or +1. */
   function nudge(edge, direction) {
     if (!state.selection) return
+    const before = state.selection.start
     state.selection = nudgedSelection(state.selection, edge, direction * nudgeSeconds.value, totalDuration.value)
+    // The playhead follows a moved start, as it does when the edge is dragged.
+    if (!state.isPlaying && state.selection && state.selection.start !== before) {
+      state.playhead = state.selection.start
+    }
   }
 
   return { busy, copy, cut, paste, silence, trim, split, nudge, nudgeSeconds }

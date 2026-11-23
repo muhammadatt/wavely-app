@@ -240,9 +240,9 @@ function handleMouseDown(e) {
     selectionAnchor.value = selectionDragAnchor(state.selection, edge)
     // No threshold on an adjust: the selection already exists, so there is no
     // sliver to protect against, and a 3 px nudge of an edge is a legitimate
-    // and common move. The playhead stays put too — the user is trimming a
-    // boundary, not seeking.
+    // and common move.
     dragExceededThreshold.value = true
+    edgeDragStart = state.selection?.start ?? null
   } else {
     selectionAnchor.value = time
     dragExceededThreshold.value = false
@@ -267,12 +267,26 @@ function handleMouseMove(e) {
   const time = Math.max(0, Math.min(pxToTime(x), totalDuration.value))
 
   setSelection(selectionAnchor.value, time)
+  followSelectionStart()
   drawOverlay() // Peaks unchanged during selection drag — overlay only
 }
 
 function handleMouseUp() {
   isSelecting.value = false
   draggingEdge.value = null
+  edgeDragStart = null
+}
+
+// Making a selection puts the playhead at its start; moving the start edge
+// afterwards must take the playhead with it, or it is left behind where the
+// old start was. Only once the START has moved — dragging the end leaves the
+// playhead alone — and never while playing, when playback owns the playhead.
+let edgeDragStart = null
+function followSelectionStart() {
+  if (!draggingEdge.value || edgeDragStart === null || state.isPlaying) return
+  const start = state.selection?.start
+  if (start === undefined || start === edgeDragStart) return
+  setPlayhead(start)
 }
 
 // ── Touch ───────────────────────────────────────────────────────────────────
@@ -413,6 +427,7 @@ function touchMove(e) {
     clearLongPress()
     if (g.edge) {
       selectionAnchor.value = selectionDragAnchor(state.selection, g.edge)
+      edgeDragStart = state.selection?.start ?? null
     } else {
       selectionAnchor.value = g.time
       setPlayhead(g.time)
@@ -425,6 +440,7 @@ function touchMove(e) {
   if (touchGesture.kind === 'select' && e.pointerId === touchGesture.id) {
     const time = Math.max(0, Math.min(pxToTime(p.x), totalDuration.value))
     setSelection(selectionAnchor.value, time)
+    followSelectionStart()
     showLoupe(p, time)
     drawOverlay()
   }
