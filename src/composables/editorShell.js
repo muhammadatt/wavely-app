@@ -17,6 +17,7 @@ import { installPerFilePluginSettings } from './perFilePluginSettings.js'
 import { useMobileSheets } from './useMobileSheets.js'
 import { useFormFactor } from './useFormFactor.js'
 import { requestTogglePlayback } from '../ui/transportBus.js'
+import { createBackGuard } from '../platform/backGuard.js'
 
 export function installEditorShell() {
   const {
@@ -25,14 +26,14 @@ export function installEditorShell() {
     selectAll, clearSelection, setPlayhead, totalDuration,
     closeRail, openCommandPalette, closeCommandPalette, closeContextMenu,
     documents, cycleDocument, setActiveDocument, closeDocument,
-    documentHasUnsavedWork, anyUnsavedWork, activeDoc,
+    documentHasUnsavedWork, anyUnsavedWork, activeDoc, showToast,
   } = useEditorState()
   installPerFilePluginSettings()
   const { promptForFiles } = useFileImport()
   const { saveDocument, saveDocumentAs } = useFileSave()
   const { closeTopWindow, anyWindowOpen } = useWindows()
   const { fileSheetOpen, closeFileSheet, effectsMenuOpen, closeEffectsMenu } = useMobileSheets()
-  const { layout } = useFormFactor()
+  const { layout, isPhone } = useFormFactor()
 
   const NUDGE_SECONDS = 1
   const NUDGE_SECONDS_COARSE = 5
@@ -275,14 +276,37 @@ export function installEditorShell() {
     e.returnValue = ''
   }
 
+  // The system Back gesture (Android: a swipe in from either edge) closed the
+  // installed app outright, taking unsaved work with it. On a phone, a touch
+  // screen or the installed app, Back closes the top sheet / menu / window
+  // instead, and leaves only when it is pressed twice (platform/backGuard.js).
+  const standalone = () => !!window.matchMedia?.('(display-mode: standalone)').matches ||
+    window.navigator?.standalone === true
+  const coarse = () => !!window.matchMedia?.('(pointer: coarse)').matches
+  const backGuard = createBackGuard({
+    enabled: () => layout.value === 'mobile' || isPhone || standalone() || coarse(),
+    closeTop() {
+      if (closeTopModal()) return true
+      if (state.railOperation || state.activeTool) { closeRail(); return true }
+      return false
+    },
+    onArmed() {
+      showToast(anyUnsavedWork.value
+        ? 'Go back again to close the editor. Unsaved edits are kept for next time.'
+        : 'Go back again to close the editor.', 2500)
+    },
+  })
+
   onMounted(() => {
     window.addEventListener('keydown', handleKeydown)
     window.addEventListener('beforeunload', handleBeforeUnload)
+    backGuard.install()
   })
 
   onUnmounted(() => {
     window.removeEventListener('keydown', handleKeydown)
     window.removeEventListener('beforeunload', handleBeforeUnload)
+    backGuard.uninstall()
   })
 }
 

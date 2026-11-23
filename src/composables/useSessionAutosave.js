@@ -30,6 +30,9 @@ export const SAVE_DELAY_MS = 1500
 /** A buffer file no manifest names is deleted once it is this old (another tab may be mid-write). */
 export const ORPHAN_GRACE_MS = 60 * 60 * 1000
 const BASE_SAMPLES_PER_PX = 256
+/** After start, how often and how many times to look again for work a closing tab still held. */
+const PENDING_RECHECK_MS = 2000
+const PENDING_RECHECKS = 15
 
 const autosave = reactive({
   /** The browser can autosave and the store opened. */
@@ -81,7 +84,16 @@ export function useSessionAutosave() {
     watch(signature, schedule)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') flushNow()
+      else recheckPending()
     })
+    // A tab that has just closed can still hold its lock for a moment — an
+    // installed phone app relaunched straight after Back closed it is the
+    // common case — and its work would read as another open tab's and never
+    // be offered. Look again for a while, until its lock is let go.
+    let tries = 0
+    const poll = setInterval(async () => {
+      if (++tries >= PENDING_RECHECKS || !(await recheckPending())) clearInterval(poll)
+    }, PENDING_RECHECK_MS)
     window.addEventListener('pagehide', flushNow)
   }
 
@@ -206,13 +218,31 @@ export function useSessionAutosave() {
     }
   }
 
-  /** Find work left by tabs that are gone. Unreadable or empty leftovers are removed. */
+  /**
+   * Refresh what is on offer, unless a restore or discard is using it.
+   * Resolves whether any other tab's work is still held by a live lock.
+   */
+  async function recheckPending() {
+    if (!store || autosave.restoring) return false
+    try {
+      return await refreshPending()
+    } catch (err) {
+      console.warn('Session autosave: could not look for unsaved work:', err)
+      return false
+    }
+  }
+
+  /**
+   * Find work left by tabs that are gone. Unreadable or empty leftovers are
+   * removed. Resolves whether any manifest belongs to a tab still holding its lock.
+   */
   async function refreshPending() {
     const others = await store.otherManifests()
+    let anyAlive = false
     pendingManifests.clear()
     const pending = []
     for (const o of others) {
-      if (o.alive) continue
+      if (o.alive) { anyAlive = true; continue }
       if (!isRestorableManifest(o.manifest) || o.manifest.docs.length === 0) {
         await store.deleteManifests(o.sessionId)
         continue
@@ -221,6 +251,7 @@ export function useSessionAutosave() {
       pending.push({ sessionId: o.sessionId, savedAt: o.manifest.savedAt, files: o.manifest.docs.map(d => d.name) })
     }
     autosave.pending = pending.sort((a, b) => b.savedAt - a.savedAt)
+    return anyAlive
   }
 
   /**
