@@ -6,16 +6,18 @@ import Icon from '../ui/Icon.vue'
 
 /**
  * The selection's readout and its actions, in place of the desktop's
- * right-click menu. Always shown with a file: Split (at the playhead) and
- * Paste work with nothing selected. Split cuts at the selection's edges when
- * there is one, else at the playhead.
+ * right-click menu. Always shown with a file. With nothing selected it is ONE
+ * row of what works then — Select all, Paste (when there is something to
+ * paste), Split at the playhead — and with a selection, the edges and every
+ * action (design "small fixes" #3, November 2026). Split cuts at the
+ * selection's edges when there is one, else at the playhead.
  *
  * Each edge's time sits between ‹ › nudge buttons: a tap moves that edge one
  * step (about 3 px at the current zoom, a round number — finer when zoomed
  * in), and holding repeats, for the precision a finger cannot reach. A
  * looping selection follows the nudge as it plays.
  */
-const { state, hasSelection, hasClipboard, clearSelection, selectAll } = useEditorState()
+const { state, hasClipboard, clearSelection, selectAll } = useEditorState()
 const { busy, cut, copy, paste, silence, trim, split, nudge, nudgeSeconds } = useSelectionActions()
 
 // Milliseconds once the step is finer than 10 ms, so a nudge always shows.
@@ -61,55 +63,72 @@ onBeforeUnmount(stopHold)
 </script>
 
 <template>
-  <div class="m-sel" data-testid="mobile-selection-bar">
+  <!-- Nothing selected: ONE row of what works without a selection — Select
+       all, Paste (with something on the clipboard) and Split at the
+       playhead; the four buttons that need a selection are not drawn greyed
+       out, and the waveform gets the height. With a selection: the edges,
+       their nudges and the full set of actions. -->
+  <div v-if="!readout" class="m-sel m-sel-idle" data-testid="mobile-selection-bar">
+    <span class="m-sel-hint">Nothing selected</span>
+    <button type="button" class="m-idle-btn" data-testid="mobile-select-all" @click="selectAll">
+      <Icon name="selectAll" :size="15" />Select all
+    </button>
+    <button v-if="hasClipboard" type="button" class="m-idle-btn" :disabled="busy" @click="paste">
+      <Icon name="paste" :size="15" />Paste
+    </button>
+    <button
+      type="button"
+      class="m-idle-btn"
+      :disabled="busy"
+      title="Split at the playhead"
+      data-testid="mobile-split"
+      @click="split"
+    ><Icon name="split" :size="15" />Split</button>
+  </div>
+
+  <div v-else class="m-sel" data-testid="mobile-selection-bar">
     <div class="m-sel-row">
-      <template v-if="readout">
-        <div v-for="edge in ['start', 'end']" :key="edge" class="m-edge" :class="`m-edge-${edge}`">
-          <button
-            type="button"
-            class="m-nudge"
-            :aria-label="`Move the ${edge} earlier`"
-            :data-testid="`nudge-${edge}-back`"
-            @pointerdown.prevent="startHold(edge, -1)"
-            @pointerup="stopHold"
-            @pointerleave="stopHold"
-            @pointercancel="stopHold"
-            @click="keyNudge($event, edge, -1)"
-          >‹</button>
-          <span class="m-edge-time" :data-testid="`edge-${edge}`">{{ readout[edge] }}</span>
-          <button
-            type="button"
-            class="m-nudge"
-            :aria-label="`Move the ${edge} later`"
-            :data-testid="`nudge-${edge}-fwd`"
-            @pointerdown.prevent="startHold(edge, 1)"
-            @pointerup="stopHold"
-            @pointerleave="stopHold"
-            @pointercancel="stopHold"
-            @click="keyNudge($event, edge, 1)"
-          >›</button>
-        </div>
-        <span class="m-sel-len">{{ readout.length }}</span>
-        <button type="button" class="m-sel-x" aria-label="Clear selection" @click="clearSelection">
-          <Icon name="close" :size="12" :stroke-width="2.5" />
-        </button>
-      </template>
-      <template v-else>
-        <span class="m-sel-hint">Nothing selected</span>
-        <button type="button" class="m-sel-all" @click="selectAll">Select all</button>
-      </template>
+      <div v-for="edge in ['start', 'end']" :key="edge" class="m-edge" :class="`m-edge-${edge}`">
+        <button
+          type="button"
+          class="m-nudge"
+          :aria-label="`Move the ${edge} earlier`"
+          :data-testid="`nudge-${edge}-back`"
+          @pointerdown.prevent="startHold(edge, -1)"
+          @pointerup="stopHold"
+          @pointerleave="stopHold"
+          @pointercancel="stopHold"
+          @click="keyNudge($event, edge, -1)"
+        >‹</button>
+        <span class="m-edge-time" :data-testid="`edge-${edge}`">{{ readout[edge] }}</span>
+        <button
+          type="button"
+          class="m-nudge"
+          :aria-label="`Move the ${edge} later`"
+          :data-testid="`nudge-${edge}-fwd`"
+          @pointerdown.prevent="startHold(edge, 1)"
+          @pointerup="stopHold"
+          @pointerleave="stopHold"
+          @pointercancel="stopHold"
+          @click="keyNudge($event, edge, 1)"
+        >›</button>
+      </div>
+      <span class="m-sel-len">{{ readout.length }}</span>
+      <button type="button" class="m-sel-x" aria-label="Clear selection" @click="clearSelection">
+        <Icon name="close" :size="12" :stroke-width="2.5" />
+      </button>
     </div>
     <div class="m-sel-actions">
-      <button type="button" class="m-act" :disabled="!hasSelection || busy" @click="cut"><Icon name="cut" :size="17" />Cut</button>
-      <button type="button" class="m-act" :disabled="!hasSelection" @click="copy"><Icon name="copy" :size="17" />Copy</button>
+      <button type="button" class="m-act" :disabled="busy" @click="cut"><Icon name="cut" :size="17" />Cut</button>
+      <button type="button" class="m-act" @click="copy"><Icon name="copy" :size="17" />Copy</button>
       <button type="button" class="m-act" :disabled="!hasClipboard || busy" @click="paste"><Icon name="paste" :size="17" />Paste</button>
-      <button type="button" class="m-act" :disabled="!hasSelection || busy" @click="silence"><Icon name="silence" :size="17" />Silence</button>
-      <button type="button" class="m-act" :disabled="!hasSelection || busy" @click="trim"><Icon name="trim" :size="17" />Trim</button>
+      <button type="button" class="m-act" :disabled="busy" @click="silence"><Icon name="silence" :size="17" />Silence</button>
+      <button type="button" class="m-act" :disabled="busy" @click="trim"><Icon name="trim" :size="17" />Trim</button>
       <button
         type="button"
         class="m-act"
         :disabled="busy"
-        :title="hasSelection ? 'Split at the selection\'s edges' : 'Split at the playhead'"
+        title="Split at the selection's edges"
         data-testid="mobile-split"
         @click="split"
       ><Icon name="split" :size="17" />Split</button>
@@ -157,7 +176,30 @@ onBeforeUnmount(stopHold)
 .m-sel-len { order: 1; flex: 1; text-align: center; font-size: 11px; color: #e8a33d; }
 .m-sel-hint { font: 500 12px 'Inter', sans-serif; color: rgba(255,255,255,.45); }
 .m-sel-x { order: 3; }
-.m-sel-x, .m-sel-all {
+.m-sel-idle {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: #171b20;
+  border-top-color: rgba(255,255,255,.06);
+}
+.m-sel-idle .m-sel-hint { flex: 1; min-width: 0; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-idle-btn {
+  height: 40px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255,255,255,.07);
+  color: #eaf6f8;
+  font: 600 12px 'Inter', sans-serif;
+}
+.m-idle-btn:disabled { opacity: .35; }
+.m-sel-x {
   margin-left: auto;
   border: none;
   background: rgba(255,255,255,.06);
@@ -165,7 +207,6 @@ onBeforeUnmount(stopHold)
   border-radius: 8px;
 }
 .m-sel-x { width: 26px; height: 26px; display: grid; place-items: center; }
-.m-sel-all { padding: 5px 10px; font: 600 12px 'Inter', sans-serif; }
 .m-sel-actions { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
 .m-act {
   display: flex;
@@ -187,5 +228,7 @@ onBeforeUnmount(stopHold)
   .m-sel-row { flex: 1; min-width: 0; }
   .m-sel-actions { display: flex; gap: 4px; }
   .m-act { width: 40px; padding: 7px 0; font-size: 0; gap: 0; }
+  .m-sel-idle { padding: 4px 8px; }
+  .m-idle-btn { height: 34px; }
 }
 </style>

@@ -4,6 +4,7 @@ import { useEditorState } from '../../composables/useEditorState.js'
 import { useWindows } from '../../composables/useWindows.js'
 import { usePluginChain } from '../../composables/usePluginChain.js'
 import { useMobileSheets } from '../../composables/useMobileSheets.js'
+import { useEntitlements } from '../../composables/useEntitlements.js'
 import Icon from '../ui/Icon.vue'
 
 /**
@@ -12,6 +13,11 @@ import Icon from '../ui/Icon.vue'
  * the Plugin Chain in its teal. It replaced a tab per toolbar category, each
  * opening its own list (owner, November 2026): one menu is as few taps, can
  * be searched, and is the same picker the chain's + Add plugin uses.
+ *
+ * Both are the same neutral button with a BARE icon (owner, November 2026);
+ * Chain's icon keeps the chain's teal. Chain carries the desktop Chain
+ * button's PRO tag while the plan lacks the chain's Apply, and ACTIVE /
+ * BYPASSED once it holds plugins, as on desktop.
  */
 const { state, closeRail, hasFile } = useEditorState()
 const { openWindow, isOpen } = useWindows()
@@ -19,6 +25,10 @@ const { slots, liveSlots, bypassed, suspended } = usePluginChain()
 const { effectsMenuOpen, openEffectsMenu, closeFileSheet } = useMobileSheets()
 
 const chainActive = computed(() => liveSlots.value.length > 0 && !bypassed.value && !suspended.value)
+// The chain's Apply is Pro (plans.js `pluginChainApply`); building the rack is
+// open to everyone, so the tag says what the plan lacks, not a lock.
+const entitlements = useEntitlements()
+const chainLocked = computed(() => !entitlements.can('pluginChainApply'))
 // Lit while the menu, or a tool opened from it, is up.
 const effectsOn = computed(() => effectsMenuOpen.value || !!state.railOperation)
 
@@ -51,11 +61,10 @@ function openChain() {
       data-testid="mobile-tab-chain"
       @click="openChain"
     >
-      <span class="m-chain-ic">
-        <Icon name="chain" :size="15" />
-        <i v-if="slots.length" :class="{ 'is-live': chainActive }" aria-hidden="true" />
-      </span>
+      <Icon name="chain" :size="18" class="m-chain-ic" />
       <span>Chain</span>
+      <span v-if="slots.length" class="m-chain-count" :class="{ 'is-live': chainActive }">{{ chainActive ? 'ACTIVE' : 'BYPASSED' }}</span>
+      <span v-else-if="chainLocked" class="m-chain-pro" data-testid="mobile-chain-pro">PRO</span>
     </button>
   </nav>
 </template>
@@ -85,29 +94,19 @@ function openChain() {
 }
 .m-tab.is-on { color: #7fe9f6; background: rgba(53,211,230,.12); }
 .m-tab:disabled { opacity: .35; }
-.m-chain { color: #eaf6f8; }
-.m-chain-ic {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 22px;
-  border-radius: 7px;
-  background: #1fa9a0;
-  color: #fff;
+.m-chain-ic { color: #2fd3bf; }
+.m-chain.is-on .m-chain-ic { color: #7fe9f6; }
+/* The desktop Chain button's tags (FloatingToolbar.vue): dark with teal ink. */
+.m-chain-pro,
+.m-chain-count {
+  font: 700 9.5px 'JetBrains Mono', monospace;
+  letter-spacing: .06em;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #08161a;
+  color: #86e8ff;
 }
-.m-chain.is-on .m-chain-ic { box-shadow: 0 0 0 2px rgba(127,233,246,.6); }
-.m-chain-ic i {
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: rgba(255,255,255,.45);
-  box-shadow: 0 0 0 2px #0b0e11;
-}
-.m-chain-ic i.is-live { background: #5df0b0; }
+.m-chain-count.is-live { color: #5df0b0; }
 
 /* On its side: a slimmer bar. */
 @media (max-height: 500px) {

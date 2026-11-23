@@ -719,6 +719,13 @@ try {
       await (await chooserP).setFiles(wav)
       await pp.waitForTimeout(3000)
       if (!/WAV/.test(await pp.locator('[data-testid=mobile-file-switcher]').innerText())) why.push('the header does not show the file; ')
+      // Idle: the selection bar is one row of what works with nothing selected,
+      // the empty scrollbar rail is a hairline, and the total has centiseconds.
+      const idle = await pp.locator('[data-testid=mobile-selection-bar]').innerText()
+      if (/\bCut\b/.test(idle) || !/Split/.test(idle) || !/Select all/.test(idle)) why.push(`the idle selection bar is not one row of Select all / Split (${idle.replace(/\s+/g, ' ')}); `)
+      const railH = await pp.evaluate(() => document.querySelector('.wf-track')?.getBoundingClientRect().height ?? -1)
+      if (!(railH > 0 && railH <= 5)) why.push(`the unscrollable rail is ${railH}px, not a hairline; `)
+      if (!/of \d+:\d\d\.\d\d/.test(await pp.locator('[data-testid=mobile-total]').innerText())) why.push('the total has no centiseconds; ')
 
       const cdp = await phone.newCDPSession(pp)
       const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', {

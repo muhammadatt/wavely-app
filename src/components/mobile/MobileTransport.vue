@@ -28,7 +28,8 @@ const playLabel = computed(() => state.isPlaying ? 'Stop' : hasSelection.value ?
   <div class="m-transport">
     <div class="m-clock" aria-label="Playhead">
       <span class="m-clock-main">{{ now.main }}<small>{{ now.cs }}</small></span>
-      <span class="m-clock-total">of {{ total.main }}</span>
+      <!-- To the clock's own precision, so a 3.9 s file is not "0:03". -->
+      <span class="m-clock-total" data-testid="mobile-total">of {{ total.main }}{{ total.cs }}</span>
     </div>
 
     <div class="m-controls">
