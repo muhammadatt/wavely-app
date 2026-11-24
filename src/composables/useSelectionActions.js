@@ -10,7 +10,7 @@ import { computed, ref } from 'vue'
 import { useEditorState } from './useEditorState.js'
 import { useOperationDispatch } from './useOperationDispatch.js'
 import { getOperation } from '../ui/registry.js'
-import { nudgeStep, nudgedSelection } from '../audio/selectionDrag.js'
+import { nudgeStep, nudgedSelection, playheadAfterEdgeAdjust } from '../audio/selectionDrag.js'
 
 // The waveform's zoom, which the nudge step follows: WaveformArea announces
 // every view change as `wavely:view-update`. One listener for the app.
@@ -25,7 +25,7 @@ if (typeof window !== 'undefined') {
 export function useSelectionActions() {
   const {
     state, hasSelection, hasClipboard, performCut, performCopy, performPaste, showToast,
-    totalDuration, performSplit, performSplitAtSelectionEdges,
+    totalDuration, performSplit, performSplitAtSelectionEdges, setPlayhead,
   } = useEditorState()
   const { dispatch } = useOperationDispatch()
 
@@ -76,7 +76,11 @@ export function useSelectionActions() {
   /** Move the selection's `edge` ('start' | 'end') one step, `direction` −1 or +1. */
   function nudge(edge, direction) {
     if (!state.selection) return
+    const before = state.selection.start
     state.selection = nudgedSelection(state.selection, edge, direction * nudgeSeconds.value, totalDuration.value)
+    // Each nudge is a drop: the playhead snaps to a moved start, as after a drag.
+    const to = playheadAfterEdgeAdjust(state.selection, before, state.isPlaying)
+    if (to !== null) setPlayhead(to)
   }
 
   return { busy, copy, cut, paste, silence, trim, split, nudge, nudgeSeconds }

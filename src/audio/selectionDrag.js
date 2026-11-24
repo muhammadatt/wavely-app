@@ -109,3 +109,20 @@ export function nudgedSelection(selection, edge, delta, duration, minLength = NU
   else end = Math.min(duration, Math.max(start + gap, end + delta))
   return { start, end }
 }
+
+/**
+ * Where the playhead goes when an edge adjust ends (a drag dropped, or one
+ * nudge): to the selection's start if the start moved, so it is not left where
+ * the old start was. `null` = leave it — the start is where it was (an end-only
+ * adjust, or a drag that came back), there is no selection, or playback is
+ * running and owns the playhead.
+ *
+ * @param {{start: number, end: number} | null} selection the selection now
+ * @param {number | null} startBefore its start when the adjust began
+ * @param {boolean} isPlaying
+ * @returns {number | null}
+ */
+export function playheadAfterEdgeAdjust(selection, startBefore, isPlaying) {
+  if (isPlaying || !selection || startBefore === null || startBefore === undefined) return null
+  return selection.start === startBefore ? null : selection.start
+}
