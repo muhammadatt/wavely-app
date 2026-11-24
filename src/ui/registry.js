@@ -617,7 +617,6 @@ const ALL_OPERATIONS = [
     // Real-time plosive repair: the low thump of a P or B, and the top-end
     // burst of a T, K or P release (the latter moved out of the De-Esser).
     id: 'plosive',
-    release: 'dev',
     label: 'Plosive Tamer',
     desc: 'Fix pops, spit and plosives',
     category: 'clean',
