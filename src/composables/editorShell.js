@@ -18,6 +18,7 @@ import { useMobileSheets } from './useMobileSheets.js'
 import { useFormFactor } from './useFormFactor.js'
 import { requestTogglePlayback } from '../ui/transportBus.js'
 import { createBackGuard } from '../platform/backGuard.js'
+import { dismissTopOverlay } from '../ui/backDismiss.js'
 import { useAccountScreen } from './useAccountScreen.js'
 import { useSessionAutosave } from './useSessionAutosave.js'
 
@@ -290,6 +291,9 @@ export function installEditorShell() {
   const backGuard = createBackGuard({
     enabled: () => layout.value === 'mobile' || isPhone || standalone() || coarse(),
     closeTop() {
+      // Overlays a component owns (the ⋯ menu, the sign-in and upgrade
+      // dialogs) sit on top of everything, the dashboard included.
+      if (dismissTopOverlay()) return true
       // The account dashboard covers everything. Opened from a link (its hash
       // already in the URL at load), Back lands on an entry that still carries
       // the hash, and the dashboard would stay up while the guard counted down
@@ -300,16 +304,18 @@ export function installEditorShell() {
       return false
     },
     onArmed() {
-      // Promise a backup only while autosave is actually keeping one.
       // A second Back may come within the second: write the backup now
       // rather than when its 1.5 s wait runs out.
       flushAutosave()
-      const backedUp = autosave.available && !autosave.stopped
-      const atRisk = anyUnsavedWork.value && !backedUp
+      // Never promise the backup: the write is still running, and a buffer
+      // that fails to store is skipped without stopping autosave. Running, it
+      // is a best effort; stopped or unsupported, there is none.
+      const backingUp = autosave.available && !autosave.stopped
+      const atRisk = anyUnsavedWork.value && !backingUp
       let note = ''
       if (anyUnsavedWork.value) {
-        note = backedUp
-          ? ' Unsaved edits are backed up for next time.'
+        note = backingUp
+          ? ' Unsaved edits should be offered back next time — save to be sure.'
           : ' Unsaved edits will be lost — save first.'
       }
       showToast(`Go back again to close the editor.${note}`, 2500, { tone: atRisk ? 'warn' : 'ok' })

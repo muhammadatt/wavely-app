@@ -19,6 +19,11 @@ function fakeWindow() {
         at--
         for (const fn of listeners.get('popstate') ?? []) fn({ state: stack[at].state })
       },
+      forward() {
+        if (at >= stack.length - 1) return
+        at++
+        for (const fn of listeners.get('popstate') ?? []) fn({ state: stack[at].state })
+      },
     },
     addEventListener(t, fn) { if (!listeners.has(t)) listeners.set(t, new Set()); listeners.get(t).add(fn) },
     removeEventListener(t, fn) { listeners.get(t)?.delete(fn) },
@@ -108,4 +113,22 @@ test('a reload on top of the guard keeps using it', () => {
   assert.equal(win.history.length, 2, 'no second guard')
   win.history.back()
   assert.equal(closed, 1)
+})
+
+test('Back then Forward in the exit window: the guard is in charge again, no second guard', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const win = fakeWindow()
+  let open = 0
+  let armed = 0
+  createBackGuard({ win, closeTop: () => (open > 0 ? (open--, true) : false), onArmed: () => armed++ }).install()
+  win.fire('pointerdown')
+  win.history.back()
+  assert.equal(armed, 1)
+  win.history.forward()
+  t.mock.timers.tick(EXIT_WINDOW_MS)
+  assert.equal(win.history.length, 2, 'the timer pushed no second guard')
+  open = 1
+  win.history.back()
+  assert.equal(open, 0, 'the next Back closes the sheet')
+  assert.equal(win.depth, 1)
 })

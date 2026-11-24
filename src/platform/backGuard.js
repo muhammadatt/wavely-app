@@ -54,8 +54,16 @@ export function createBackGuard({ win = globalThis.window, closeTop, onArmed, en
   }
 
   function onPopState(e) {
-    // Landed on the guard itself (an entry above it was popped): not ours.
-    if (isGuard(e?.state ?? win.history.state)) return
+    // Landed on a guard entry: an entry above it was popped (left to its own
+    // handler), or Forward went back onto the guard during the exit window.
+    // Either way the guard is on top again: say so, and stop the timer that
+    // would push a second one — a Back onto that would do nothing.
+    if (isGuard(e?.state ?? win.history.state)) {
+      guarded = true
+      clearTimeout(exitTimer)
+      exitTimer = null
+      return
+    }
     if (!guarded) return
     guarded = false
     if (!enabled()) return
