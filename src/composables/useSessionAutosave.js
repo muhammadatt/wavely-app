@@ -25,11 +25,15 @@ import {
 import { computePeakCache } from '../audio/processing.js'
 import { isMobileDevice, memoryBudget } from '../platform/memoryBudget.js'
 import { useServerJobs } from './useServerJobs.js'
+import { createPendingRecheck } from '../platform/pendingRecheck.js'
 
 export const SAVE_DELAY_MS = 1500
 /** A buffer file no manifest names is deleted once it is this old (another tab may be mid-write). */
 export const ORPHAN_GRACE_MS = 60 * 60 * 1000
 const BASE_SAMPLES_PER_PX = 256
+/** After start, how often and how many times to look again for work a closing tab still held. */
+const PENDING_RECHECK_MS = 2000
+const PENDING_RECHECKS = 15
 
 const autosave = reactive({
   /** The browser can autosave and the store opened. */
@@ -53,6 +57,10 @@ const unwritable = new Set()
 let timer = null
 let running = null
 let again = false
+/** Re-reads what is on offer (platform/pendingRecheck.js); built by the first caller. */
+let recheck = null
+/** A discard is deleting what is on offer: a recheck must not refill it meanwhile. */
+let discarding = false
 
 export function useSessionAutosave() {
   const editor = useEditorState()
@@ -77,11 +85,15 @@ export function useSessionAutosave() {
     }
     if (!store) return
     autosave.available = true
-    await refreshPending()
     watch(signature, schedule)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') flushNow()
+      else recheck.check()
     })
+    // A tab that has just closed can still hold its lock for a moment, and
+    // its work would read as another open tab's: look again for a while
+    // (platform/pendingRecheck.js).
+    if (await recheck.check()) recheck.poll(PENDING_RECHECK_MS, PENDING_RECHECKS)
     window.addEventListener('pagehide', flushNow)
   }
 
@@ -206,13 +218,24 @@ export function useSessionAutosave() {
     }
   }
 
-  /** Find work left by tabs that are gone. Unreadable or empty leftovers are removed. */
+  // One per app, like the state above: every caller must wait on the same check.
+  recheck ??= createPendingRecheck({
+    refresh: () => refreshPending(),
+    busy: () => !store || autosave.restoring || discarding,
+    onError: err => console.warn('Session autosave: could not look for unsaved work:', err),
+  })
+
+  /**
+   * Find work left by tabs that are gone. Unreadable or empty leftovers are
+   * removed. Resolves whether any manifest belongs to a tab still holding its lock.
+   */
   async function refreshPending() {
     const others = await store.otherManifests()
+    let anyAlive = false
     pendingManifests.clear()
     const pending = []
     for (const o of others) {
-      if (o.alive) continue
+      if (o.alive) { anyAlive = true; continue }
       if (!isRestorableManifest(o.manifest) || o.manifest.docs.length === 0) {
         await store.deleteManifests(o.sessionId)
         continue
@@ -221,6 +244,7 @@ export function useSessionAutosave() {
       pending.push({ sessionId: o.sessionId, savedAt: o.manifest.savedAt, files: o.manifest.docs.map(d => d.name) })
     }
     autosave.pending = pending.sort((a, b) => b.savedAt - a.savedAt)
+    return anyAlive
   }
 
   /**
@@ -234,6 +258,9 @@ export function useSessionAutosave() {
     const ctx = editor.getAudioContext()
     const budget = memoryBudget()
     const mobile = isMobileDevice()
+    // A recheck in flight would refill what this is about to read. (The
+    // AudioContext above is taken first, while the click's gesture holds.)
+    await recheck.idle()
     const loaded = new Map()
     /** sessionId → the snapshots still to restore (what failed or did not fit). */
     const leftover = new Map()
@@ -312,7 +339,17 @@ export function useSessionAutosave() {
   /** Throw away the work left by tabs that are gone. */
   async function discard() {
     // Never while a restore is reading the files it would delete.
-    if (!store || autosave.restoring) return
+    if (!store || autosave.restoring || discarding) return
+    discarding = true
+    try {
+      await recheck.idle()
+      await discardPending()
+    } finally {
+      discarding = false
+    }
+  }
+
+  async function discardPending() {
     // Their buffers belong to tabs that are gone, so nobody can be mid-write on
     // them: delete the ones no remaining manifest names now, not after the grace.
     const dropped = new Set()

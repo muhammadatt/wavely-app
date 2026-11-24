@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import LegalConsentNote from './LegalConsentNote.vue'
 import { useAuth } from '../composables/useAuth.js'
 import { useModalFocus } from '../composables/useModalFocus.js'
+import { useBackDismiss } from '../ui/backDismiss.js'
 import { AUTH_PROVIDERS } from '../auth/config.js'
 import { authCopy, ACCOUNT_BENEFITS } from '../auth/pitch.js'
 import { MIN_PASSWORD, passwordStrength } from '../auth/passwordStrength.js'
@@ -138,6 +139,8 @@ function close() {
   // user asked for should still be waiting.
   if (!busy.value) auth.closeDialog({ keepIntent: !!sent.value })
 }
+// Back closes it as Escape does; while busy it stays, and the Back is spent here.
+useBackDismiss(() => { close(); return true })
 
 function validEmail(v) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())

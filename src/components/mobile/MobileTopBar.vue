@@ -9,6 +9,7 @@ import { formatDuration } from '../../utils/format.js'
 import { baseName } from '../../ui/tabName.js'
 import Icon from '../ui/Icon.vue'
 import { useAccountActions } from '../../composables/useAccountActions.js'
+import { useBackDismiss } from '../../ui/backDismiss.js'
 
 /**
  * The mobile shell's header: the active file (its name opens the file
@@ -62,6 +63,13 @@ function run(action) {
   menuOpen.value = false
   action()
 }
+
+// The system Back closes the menu before anything under it.
+useBackDismiss(() => {
+  if (!menuOpen.value) return false
+  menuOpen.value = false
+  return true
+})
 </script>
 
 <template>

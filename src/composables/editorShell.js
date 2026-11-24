@@ -17,6 +17,10 @@ import { installPerFilePluginSettings } from './perFilePluginSettings.js'
 import { useMobileSheets } from './useMobileSheets.js'
 import { useFormFactor } from './useFormFactor.js'
 import { requestTogglePlayback } from '../ui/transportBus.js'
+import { createBackGuard } from '../platform/backGuard.js'
+import { dismissTopOverlay } from '../ui/backDismiss.js'
+import { useAccountScreen } from './useAccountScreen.js'
+import { useSessionAutosave } from './useSessionAutosave.js'
 
 export function installEditorShell() {
   const {
@@ -25,14 +29,14 @@ export function installEditorShell() {
     selectAll, clearSelection, setPlayhead, totalDuration,
     closeRail, openCommandPalette, closeCommandPalette, closeContextMenu,
     documents, cycleDocument, setActiveDocument, closeDocument,
-    documentHasUnsavedWork, anyUnsavedWork, activeDoc,
+    documentHasUnsavedWork, anyUnsavedWork, activeDoc, showToast,
   } = useEditorState()
   installPerFilePluginSettings()
   const { promptForFiles } = useFileImport()
   const { saveDocument, saveDocumentAs } = useFileSave()
   const { closeTopWindow, anyWindowOpen } = useWindows()
   const { fileSheetOpen, closeFileSheet, effectsMenuOpen, closeEffectsMenu } = useMobileSheets()
-  const { layout } = useFormFactor()
+  const { layout, isPhone } = useFormFactor()
 
   const NUDGE_SECONDS = 1
   const NUDGE_SECONDS_COARSE = 5
@@ -275,14 +279,59 @@ export function installEditorShell() {
     e.returnValue = ''
   }
 
+  // The system Back gesture (Android: a swipe in from either edge) closed the
+  // installed app outright, taking unsaved work with it. On a phone, a touch
+  // screen or the installed app, Back closes the top sheet / menu / window
+  // instead, and leaves only when it is pressed twice (platform/backGuard.js).
+  const standalone = () => !!window.matchMedia?.('(display-mode: standalone)').matches ||
+    window.navigator?.standalone === true
+  const coarse = () => !!window.matchMedia?.('(pointer: coarse)').matches
+  const accountScreen = useAccountScreen()
+  const { autosave, flushNow: flushAutosave } = useSessionAutosave()
+  const backGuard = createBackGuard({
+    enabled: () => layout.value === 'mobile' || isPhone || standalone() || coarse(),
+    closeTop() {
+      // Overlays a component owns (the ⋯ menu, the sign-in and upgrade
+      // dialogs) sit on top of everything, the dashboard included.
+      if (dismissTopOverlay()) return true
+      // The account dashboard covers everything. Opened from a link (its hash
+      // already in the URL at load), Back lands on an entry that still carries
+      // the hash, and the dashboard would stay up while the guard counted down
+      // to leaving: close it here instead.
+      if (accountScreen.state.open) { accountScreen.close(); return true }
+      if (closeTopModal()) return true
+      if (state.railOperation || state.activeTool) { closeRail(); return true }
+      return false
+    },
+    onArmed() {
+      // A second Back may come within the second: write the backup now
+      // rather than when its 1.5 s wait runs out.
+      flushAutosave()
+      // Never promise the backup: the write is still running, and a buffer
+      // that fails to store is skipped without stopping autosave. Running, it
+      // is a best effort; stopped or unsupported, there is none.
+      const backingUp = autosave.available && !autosave.stopped
+      const atRisk = anyUnsavedWork.value && !backingUp
+      let note = ''
+      if (anyUnsavedWork.value) {
+        note = backingUp
+          ? ' Unsaved edits should be offered back next time — save to be sure.'
+          : ' Unsaved edits will be lost — save first.'
+      }
+      showToast(`Go back again to close the editor.${note}`, 2500, { tone: atRisk ? 'warn' : 'ok' })
+    },
+  })
+
   onMounted(() => {
     window.addEventListener('keydown', handleKeydown)
     window.addEventListener('beforeunload', handleBeforeUnload)
+    backGuard.install()
   })
 
   onUnmounted(() => {
     window.removeEventListener('keydown', handleKeydown)
     window.removeEventListener('beforeunload', handleBeforeUnload)
+    backGuard.uninstall()
   })
 }
 

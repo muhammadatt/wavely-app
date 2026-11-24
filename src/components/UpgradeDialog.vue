@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useAuth } from '../composables/useAuth.js'
+import { useBackDismiss } from '../ui/backDismiss.js'
 import { useBilling } from '../composables/useBilling.js'
 import { useModalFocus } from '../composables/useModalFocus.js'
 import { FEATURES, PLAN_LABELS } from '../auth/plans.js'
@@ -139,6 +140,7 @@ onUnmounted(() => window.removeEventListener('focus', onFocusBack))
 function close() {
   auth.closeUpgrade()
 }
+useBackDismiss(() => { close(); return true })
 
 // Focus moves in on open, Tab stays inside, and focus returns to the opener.
 const root = ref(null)
