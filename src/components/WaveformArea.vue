@@ -5,7 +5,7 @@ import { MAX_PIXELS_PER_SECOND } from '../audio/zoom.js'
 import { useEditorState } from '../composables/useEditorState.js'
 import { useCanvasRecovery } from '../composables/useCanvasRecovery.js'
 import WaveformLoupe from './WaveformLoupe.vue'
-import { hitSelectionEdge, selectionDragAnchor } from '../audio/selectionDrag.js'
+import { hitSelectionEdge, selectionDragAnchor, playheadAfterEdgeAdjust } from '../audio/selectionDrag.js'
 import {
   TOUCH_EDGE_GRAB_PX, TOUCH_DRAG_THRESHOLD_PX, LONG_PRESS_MS,
   pinchSpan, pinchMidX, pinchView, scrollForAnchor,
@@ -267,26 +267,26 @@ function handleMouseMove(e) {
   const time = Math.max(0, Math.min(pxToTime(x), totalDuration.value))
 
   setSelection(selectionAnchor.value, time)
-  followSelectionStart()
   drawOverlay() // Peaks unchanged during selection drag — overlay only
 }
 
 function handleMouseUp() {
+  if (isSelecting.value) endEdgeDrag()
   isSelecting.value = false
   draggingEdge.value = null
-  edgeDragStart = null
 }
 
 // Making a selection puts the playhead at its start; moving the start edge
 // afterwards must take the playhead with it, or it is left behind where the
-// old start was. Only once the START has moved — dragging the end leaves the
-// playhead alone — and never while playing, when playback owns the playhead.
+// old start was. It snaps on DROP, not during the drag: only the start the
+// drag ends on matters (playheadAfterEdgeAdjust has the rules).
 let edgeDragStart = null
-function followSelectionStart() {
-  if (!draggingEdge.value || edgeDragStart === null || state.isPlaying) return
-  const start = state.selection?.start
-  if (start === undefined || start === edgeDragStart) return
-  setPlayhead(start)
+function endEdgeDrag() {
+  if (draggingEdge.value) {
+    const to = playheadAfterEdgeAdjust(state.selection, edgeDragStart, state.isPlaying)
+    if (to !== null) setPlayhead(to)
+  }
+  edgeDragStart = null
 }
 
 // ── Touch ───────────────────────────────────────────────────────────────────
@@ -440,7 +440,6 @@ function touchMove(e) {
   if (touchGesture.kind === 'select' && e.pointerId === touchGesture.id) {
     const time = Math.max(0, Math.min(pxToTime(p.x), totalDuration.value))
     setSelection(selectionAnchor.value, time)
-    followSelectionStart()
     showLoupe(p, time)
     drawOverlay()
   }
@@ -460,6 +459,7 @@ function touchUp(e, cancelled) {
     }
     touchGesture = { kind: 'done' }
   } else if (g?.kind === 'select' && e.pointerId === g.id) {
+    endEdgeDrag()
     touchGesture = { kind: 'done' }
   } else if (g?.kind === 'pinch' && touches.size < 2) {
     // Lifting one finger of a pinch must not turn the other into a selection.

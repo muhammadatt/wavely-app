@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import {
   hitSelectionEdge,
   selectionDragAnchor,
+  playheadAfterEdgeAdjust,
   SELECTION_EDGE_GRAB_PX,
 } from '../../src/audio/selectionDrag.js'
 
@@ -76,4 +77,18 @@ test('dragging one edge past the other keeps a forward selection', () => {
     { start: Math.min(anchor, pointer), end: Math.max(anchor, pointer) },
     { start: 0.5, end: 2 }
   )
+})
+
+test('the playhead snaps to a moved start when an edge adjust ends', () => {
+  // The start moved: snap to it.
+  assert.equal(playheadAfterEdgeAdjust({ start: 1.2, end: 3 }, 1.8, false), 1.2)
+  // An end drag past the anchor moves the start too.
+  assert.equal(playheadAfterEdgeAdjust({ start: 0.5, end: 1 }, 1, false), 0.5)
+  // The start is where it began (end-only, or dragged out and back): leave it.
+  assert.equal(playheadAfterEdgeAdjust({ start: 1, end: 2 }, 1, false), null)
+  // Playback owns the playhead.
+  assert.equal(playheadAfterEdgeAdjust({ start: 1.2, end: 3 }, 1.8, true), null)
+  // No selection (collapsed on drop), or no recorded start.
+  assert.equal(playheadAfterEdgeAdjust(null, 1.8, false), null)
+  assert.equal(playheadAfterEdgeAdjust({ start: 1.2, end: 3 }, null, false), null)
 })
