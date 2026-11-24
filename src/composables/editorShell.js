@@ -18,6 +18,8 @@ import { useMobileSheets } from './useMobileSheets.js'
 import { useFormFactor } from './useFormFactor.js'
 import { requestTogglePlayback } from '../ui/transportBus.js'
 import { createBackGuard } from '../platform/backGuard.js'
+import { useAccountScreen } from './useAccountScreen.js'
+import { useSessionAutosave } from './useSessionAutosave.js'
 
 export function installEditorShell() {
   const {
@@ -283,17 +285,34 @@ export function installEditorShell() {
   const standalone = () => !!window.matchMedia?.('(display-mode: standalone)').matches ||
     window.navigator?.standalone === true
   const coarse = () => !!window.matchMedia?.('(pointer: coarse)').matches
+  const accountScreen = useAccountScreen()
+  const { autosave, flushNow: flushAutosave } = useSessionAutosave()
   const backGuard = createBackGuard({
     enabled: () => layout.value === 'mobile' || isPhone || standalone() || coarse(),
     closeTop() {
+      // The account dashboard covers everything. Opened from a link (its hash
+      // already in the URL at load), Back lands on an entry that still carries
+      // the hash, and the dashboard would stay up while the guard counted down
+      // to leaving: close it here instead.
+      if (accountScreen.state.open) { accountScreen.close(); return true }
       if (closeTopModal()) return true
       if (state.railOperation || state.activeTool) { closeRail(); return true }
       return false
     },
     onArmed() {
-      showToast(anyUnsavedWork.value
-        ? 'Go back again to close the editor. Unsaved edits are kept for next time.'
-        : 'Go back again to close the editor.', 2500)
+      // Promise a backup only while autosave is actually keeping one.
+      // A second Back may come within the second: write the backup now
+      // rather than when its 1.5 s wait runs out.
+      flushAutosave()
+      const backedUp = autosave.available && !autosave.stopped
+      const atRisk = anyUnsavedWork.value && !backedUp
+      let note = ''
+      if (anyUnsavedWork.value) {
+        note = backedUp
+          ? ' Unsaved edits are backed up for next time.'
+          : ' Unsaved edits will be lost — save first.'
+      }
+      showToast(`Go back again to close the editor.${note}`, 2500, { tone: atRisk ? 'warn' : 'ok' })
     },
   })
 

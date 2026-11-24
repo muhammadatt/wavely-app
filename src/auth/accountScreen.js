@@ -105,11 +105,10 @@ export function createAccountScreen({ auth, win = globalThis.window }) {
       if (status === 'signedIn' && pending) open(pending)
       // A deep link that waited out the session check, to find no session.
       else if (status === 'signedOut' && pending && !auth.state.dialog) auth.openDialog('signIn')
-      else if (status === 'signedOut' && state.open) {
-        state.open = false
-        pushed = false
-        setHash(null, 'replace')
-      }
+      // Closed as the user's own close would: back off an entry we pushed
+      // (replacing it in place left an extra entry, and a Back that did
+      // nothing — the editor's back guard sat under it), else strip the hash.
+      else if (status === 'signedOut' && state.open) close()
     }, { flush: 'sync' })
 
     // The log-in prompt for a deep link closed without a sign-in: drop the

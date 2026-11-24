@@ -138,6 +138,18 @@ test('signing out closes it', () => {
   assert.equal(win.location.hash, '')
 })
 
+test('signing out goes back off the entry it pushed, leaving no extra entry', () => {
+  const win = fakeWindow()
+  const auth = fakeAuth()
+  const screen = createAccountScreen({ auth, win })
+  screen.start()
+  screen.open('billing')
+  assert.equal(win.index, 1)
+  auth.state.status = 'signedOut'
+  assert.equal(win.index, 0, 'back on the entry under the dashboard, so the next Back is a real one')
+  assert.equal(win.location.hash, '')
+})
+
 test('with accounts off it never opens and a stale hash is cleared', () => {
   const win = fakeWindow('https://app.example/#/account')
   const screen = createAccountScreen({ auth: fakeAuth('disabled'), win })

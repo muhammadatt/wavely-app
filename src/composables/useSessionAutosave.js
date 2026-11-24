@@ -25,6 +25,7 @@ import {
 import { computePeakCache } from '../audio/processing.js'
 import { isMobileDevice, memoryBudget } from '../platform/memoryBudget.js'
 import { useServerJobs } from './useServerJobs.js'
+import { createPendingRecheck } from '../platform/pendingRecheck.js'
 
 export const SAVE_DELAY_MS = 1500
 /** A buffer file no manifest names is deleted once it is this old (another tab may be mid-write). */
@@ -56,6 +57,10 @@ const unwritable = new Set()
 let timer = null
 let running = null
 let again = false
+/** Re-reads what is on offer (platform/pendingRecheck.js); built by the first caller. */
+let recheck = null
+/** A discard is deleting what is on offer: a recheck must not refill it meanwhile. */
+let discarding = false
 
 export function useSessionAutosave() {
   const editor = useEditorState()
@@ -80,20 +85,15 @@ export function useSessionAutosave() {
     }
     if (!store) return
     autosave.available = true
-    await refreshPending()
     watch(signature, schedule)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') flushNow()
-      else recheckPending()
+      else recheck.check()
     })
-    // A tab that has just closed can still hold its lock for a moment — an
-    // installed phone app relaunched straight after Back closed it is the
-    // common case — and its work would read as another open tab's and never
-    // be offered. Look again for a while, until its lock is let go.
-    let tries = 0
-    const poll = setInterval(async () => {
-      if (++tries >= PENDING_RECHECKS || !(await recheckPending())) clearInterval(poll)
-    }, PENDING_RECHECK_MS)
+    // A tab that has just closed can still hold its lock for a moment, and
+    // its work would read as another open tab's: look again for a while
+    // (platform/pendingRecheck.js).
+    if (await recheck.check()) recheck.poll(PENDING_RECHECK_MS, PENDING_RECHECKS)
     window.addEventListener('pagehide', flushNow)
   }
 
@@ -218,19 +218,12 @@ export function useSessionAutosave() {
     }
   }
 
-  /**
-   * Refresh what is on offer, unless a restore or discard is using it.
-   * Resolves whether any other tab's work is still held by a live lock.
-   */
-  async function recheckPending() {
-    if (!store || autosave.restoring) return false
-    try {
-      return await refreshPending()
-    } catch (err) {
-      console.warn('Session autosave: could not look for unsaved work:', err)
-      return false
-    }
-  }
+  // One per app, like the state above: every caller must wait on the same check.
+  recheck ??= createPendingRecheck({
+    refresh: () => refreshPending(),
+    busy: () => !store || autosave.restoring || discarding,
+    onError: err => console.warn('Session autosave: could not look for unsaved work:', err),
+  })
 
   /**
    * Find work left by tabs that are gone. Unreadable or empty leftovers are
@@ -265,6 +258,9 @@ export function useSessionAutosave() {
     const ctx = editor.getAudioContext()
     const budget = memoryBudget()
     const mobile = isMobileDevice()
+    // A recheck in flight would refill what this is about to read. (The
+    // AudioContext above is taken first, while the click's gesture holds.)
+    await recheck.idle()
     const loaded = new Map()
     /** sessionId → the snapshots still to restore (what failed or did not fit). */
     const leftover = new Map()
@@ -343,7 +339,17 @@ export function useSessionAutosave() {
   /** Throw away the work left by tabs that are gone. */
   async function discard() {
     // Never while a restore is reading the files it would delete.
-    if (!store || autosave.restoring) return
+    if (!store || autosave.restoring || discarding) return
+    discarding = true
+    try {
+      await recheck.idle()
+      await discardPending()
+    } finally {
+      discarding = false
+    }
+  }
+
+  async function discardPending() {
     // Their buffers belong to tabs that are gone, so nobody can be mid-write on
     // them: delete the ones no remaining manifest names now, not after the grace.
     const dropped = new Set()
