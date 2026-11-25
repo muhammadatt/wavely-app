@@ -61,6 +61,11 @@ export const FEATURES = {
 
   // Real-time plugins: full preview for everyone, Apply needs Pro.
   pluginChainApply: { requires: 'pro', label: 'The Effect Chain' },
+  // A shared before / after (`/s/<id>`): its processed take is downloadable
+  // from the listen page, so it is the chain's output leaving the editor —
+  // Pro, like the chain's Apply. Enforced by the database too (the shares
+  // table's insert policy, supabase/migrations/20261125000000_shares.sql).
+  shareListen: { requires: 'pro', label: 'Sharing a before / after' },
 
   // Server ANALYSIS, browser DSP: the analysis needs any account (any length,
   // up to the analyze route's cap) — a sign-in, never a payment; Apply needs Pro.

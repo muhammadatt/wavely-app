@@ -32,6 +32,7 @@ import FloatingWindow from '../FloatingWindow.vue'
 import PluginPicker from '../../PluginPicker.vue'
 import ModulaLedPill from '../../modula/ModulaLedPill.vue'
 import { requestTogglePlayback } from '../../../ui/transportBus.js'
+import { useShareListen } from '../../../composables/useShareListen.js'
 
 defineProps({ z: { type: Number, default: 500 } })
 
@@ -45,6 +46,9 @@ const ACCENT = '#e8a33d'
 
 // Saved chains: the same preset browser every plugin has, over the whole rack.
 const chainPresets = useChainPresets()
+
+// Share a before / after of the selection (or the file) through this chain.
+const share = useShareListen()
 
 // Selection is FloatingWindow's to explain; everything else is ours.
 const blocker = computed(() => (state.selection ? applyBlocker() : ''))
@@ -120,6 +124,13 @@ function onDragEnd() {
       <div class="pc-head">
         <span class="pc-caption">SIGNAL FLOW · TOP RUNS FIRST</span>
         <span class="pc-head-actions">
+          <button
+            v-if="share.available && slots.length"
+            type="button" class="pc-text-btn"
+            data-testid="chain-share"
+            title="Share a before / after of the selection (or the whole file) through this chain"
+            @click="share.open()"
+          >Share…</button>
           <button
             v-if="slots.length"
             type="button" class="pc-text-btn"

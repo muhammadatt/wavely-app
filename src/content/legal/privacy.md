@@ -29,6 +29,8 @@ This policy explains what personal data crisp.fm collects, why, how long we keep
 - finished results are held in memory for download and deleted when downloaded or one hour after the job finishes, whichever comes first; temporary processing files are deleted when the job ends;
 - we do not listen to your audio, use it to train machine-learning models, or share it with anyone other than the hosting provider that runs our processing servers and our network provider (Cloudflare), through which uploads pass in transit.
 
+**Shared before / after pages.** If you choose Share in the Plugin Chain, we store two MP3 copies of the part you share (before and after the chain), the chain's settings, and the title and note you write, in our storage provider (Supabase), linked to your account. Anyone who has the page's link can listen to and download both copies and see the title, note and chain; the page does not show who shared it, and shares are not listed or indexed by us. They stay until you delete them (Plugin Chain → Share… → Your shares), or until your account is deleted. Only share audio you have the right to share.
+
 **Kept in your browser.** To protect unsaved work, the editor keeps copies of files with unsaved edits in your browser's private storage (the Origin Private File System), with your timeline and selection. This stays on your device and is never sent to us. It is removed when you save or discard the work, or you can remove it by clearing this site's data in your browser.
 
 **Folders you choose.** If you pick a working folder or save over an original file, your browser gives the page permission to write there. We never see the folder's location on your computer.
@@ -100,6 +102,7 @@ Our providers may process data outside your country, including in the United Sta
 - **Server and network logs:** [30] days.
 - **Account data and saved presets:** while your account exists; deleted within [30] days of account deletion, except as below.
 - **Billing records:** as long as tax and accounting law requires (typically [7] years). Stripe keeps its own records under its policy.
+- **Shared before / after pages:** until you delete them; with your account, within [30] days of account deletion.
 - **Data on your device:** until you save, discard or clear it.
 
 ## 8. Your rights

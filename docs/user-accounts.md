@@ -45,7 +45,7 @@ Every existing feature works signed out, with or without accounts configured.
 1. Create a project at supabase.com (one per environment is simplest: e.g.
    `wavely-staging`, `wavely-prod`).
 2. Apply the schema — every file in `supabase/migrations/`, in name order
-   (`…_accounts.sql`, then `…_user_presets.sql`) — via the Supabase CLI
+   (`…_accounts.sql`, `…_user_presets.sql`, … `…_shares.sql`) — via the Supabase CLI
    (`supabase link` then `supabase db push`) or by pasting each into the SQL
    editor.
 3. **Authentication → URL Configuration**
@@ -308,6 +308,28 @@ features are actually enforced.
 - **Code:** the store (`src/audio/pluginPresets/store.js`) has pluggable
   backends: `local`, `account` (`src/auth/presetBackend.js`) and `none`.
   `useAuth` switches between them as the session changes.
+
+## Shared before / after pages
+
+`supabase/migrations/20261125000000_shares.sql` adds `public.shares` and a
+public `shares` storage bucket (MP3 only, 25 MB a file). The chain window's
+**Share…** (`src/composables/useShareListen.js`) renders the selection dry and
+through the live chain, uploads both as MP3 and gives a `/s/<id>` link
+(`src/listen/`); the page's "Open in crisp.fm" goes to `/?listen=<id>`.
+
+- **Creating needs Pro, in the database**: the insert policy calls
+  `public.has_paid_plan()`, which mirrors `ENTITLED_STATUSES` / `PAID_PLANS` in
+  `server/lib/plans.js` (a test keeps them in step). 50 shares per user.
+- **Unlisted**: anon cannot select the table; it calls `get_share(id)`, which
+  returns one ready row. The bucket serves objects by exact path and has no
+  select policy, so it cannot be listed.
+- **Deleting**: the owner deletes in the dialog (objects first, then the row).
+  ⚠ Deleting an ACCOUNT cascades to its rows but leaves the objects: when you
+  delete accounts, remove `shares/<id>/` folders that have no row.
+- **Takedown**: delete the row and its folder from the dashboard. Set
+  `ABUSE_CONTACT_EMAIL` in `src/content/legal/contact.js` to show a "Report
+  this page" link on every listen page.
+- **Hosting**: `/s/<id>` needs the rewrite in `vercel.json`.
 
 ## Billing (Stripe)
 

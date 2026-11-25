@@ -12,8 +12,11 @@ const { state, load, save, dismiss, canSave } = useSharedLink()
 const { slots } = usePluginChain()
 
 const offer = computed(() => state.offer)
-const eyebrow = computed(() => (offer.value?.kind === 'chain' ? 'Shared chain' : `Shared ${offer.value?.pluginLabel} preset`))
-const replaces = computed(() => offer.value?.kind === 'chain' && slots.value.length > 0)
+const EYEBROW = { chain: 'Shared chain', project: 'Shared before / after' }
+const eyebrow = computed(() => EYEBROW[offer.value?.kind] ?? `Shared ${offer.value?.pluginLabel} preset`)
+const hasChain = computed(() => offer.value?.kind === 'chain' || offer.value?.kind === 'project')
+const replaces = computed(() => hasChain.value && slots.value.length > 0)
+const savable = computed(() => offer.value?.kind !== 'project' || offer.value.plugins.some(p => p.available))
 </script>
 
 <template>
@@ -21,22 +24,27 @@ const replaces = computed(() => offer.value?.kind === 'chain' && slots.value.len
     <div class="share-eyebrow">{{ eyebrow }}</div>
     <div class="share-name" :title="offer.name">{{ offer.name }}</div>
 
-    <ol v-if="offer.kind === 'chain'" class="share-slots">
+    <p v-if="offer.kind === 'project' && offer.note" class="share-note">{{ offer.note }}</p>
+
+    <ol v-if="hasChain && offer.plugins.length" class="share-slots">
       <li v-for="(p, i) in offer.plugins" :key="i" :class="{ off: !p.active, missing: !p.available }">
         {{ p.label }}<span v-if="!p.available"> — not in this version</span><span v-else-if="!p.active"> (bypassed)</span>
       </li>
     </ol>
 
     <div class="share-line">
-      <template v-if="offer.kind === 'chain'">
+      <template v-if="offer.kind === 'project'">
+        Opens the recording as a new file with its chain{{ replaces ? `, replacing the ${slots.length} plugin${slots.length === 1 ? '' : 's'} in your chain` : '' }}, and plays it. Bypass the chain to hear the original.
+      </template>
+      <template v-else-if="offer.kind === 'chain'">
         Loads into the Plugin Chain{{ replaces ? `, replacing the ${slots.length} plugin${slots.length === 1 ? '' : 's'} there` : '' }}. Open a file to hear it.
       </template>
       <template v-else>Sets {{ offer.pluginLabel }}’s controls and opens it.</template>
     </div>
 
     <div class="share-actions">
-      <button type="button" class="share-load" @click="load">Load</button>
-      <button type="button" class="share-link" :title="canSave() ? '' : 'Log in to save presets'" @click="save">Save to my {{ offer.kind === 'chain' ? 'chains' : 'presets' }}</button>
+      <button type="button" class="share-load" :disabled="state.loading" @click="load">{{ offer.kind === 'project' ? (state.loading ? 'Opening…' : 'Open') : 'Load' }}</button>
+      <button v-if="savable" type="button" class="share-link" :title="canSave() ? '' : 'Log in to save presets'" @click="save">Save {{ offer.kind === 'project' ? 'the chain' : '' }} to my {{ offer.kind === 'preset' ? 'presets' : 'chains' }}</button>
       <button type="button" class="share-link" @click="dismiss">Dismiss</button>
     </div>
   </div>
@@ -74,6 +82,14 @@ const replaces = computed(() => offer.value?.kind === 'chain' && slots.value.len
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.share-note {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: rgba(255,255,255,.78);
+  white-space: pre-line;
+}
+.share-load:disabled { opacity: .6; cursor: default; }
 .share-slots {
   margin: 8px 0 0;
   padding-left: 20px;

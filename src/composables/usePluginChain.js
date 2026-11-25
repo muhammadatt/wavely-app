@@ -343,9 +343,14 @@ export function usePluginChain() {
   /** Why the chain can't be applied right now, or ''. */
   function applyBlocker() {
     if (!state.selection) return 'Make a selection on the waveform first'
+    return renderBlocker('apply')
+  }
+
+  /** Why the live chain can't be rendered (by Apply, or for a share), or ''. */
+  function renderBlocker(verb = 'apply') {
     // What Apply writes must be what is heard: a bypassed chain previews the
     // dry audio, so it cannot apply its slots. (It is bypassed after every Apply.)
-    if (bypassed.value) return 'Turn the chain on to apply it'
+    if (bypassed.value) return `Turn the chain on to ${verb} it`
     if (liveSlots.value.length === 0) return 'Turn on at least one plugin in the chain'
     for (const s of liveSlots.value) {
       const def = plugins.get(s.id)
@@ -354,6 +359,29 @@ export function usePluginChain() {
       if (why) return `${s.label}: ${why}`
     }
     return ''
+  }
+
+  /**
+   * Every live slot, in order, over [start, end] of the ACTIVE document, each
+   * on the previous one's output (a scratch copy of the segment list, never
+   * the document's) — what Apply commits, and what a share plays as "after".
+   * `check()` runs around every slot (Apply's document pin). Commits nothing,
+   * and refuses while an Apply runs.
+   */
+  async function renderLive(start, end, { check = () => {}, onStage } = {}) {
+    const live = liveSlots.value
+    const defs = live.map(s => plugins.get(s.id))
+    if (!defs.length || defs.some(d => !d)) throw new Error(renderBlocker('render') || 'A plugin in the chain cannot be rendered')
+    let segments = state.segments
+    let buffer = null
+    for (let i = 0; i < defs.length; i++) {
+      check()
+      onStage?.(i, live[i].label)
+      buffer = await defs[i].render(segments, start, end)
+      check()
+      segments = replaceRegionWithBuffer(segments, start, end, buffer, `chain-scratch-${i}`)
+    }
+    return buffer
   }
 
   /**
@@ -398,16 +426,13 @@ export function usePluginChain() {
     applying.value = true
     startProcessing(`Applying chain (${defs.length} plugin${defs.length === 1 ? '' : 's'})...`, docId)
     try {
-      let segments = state.segments
-      let buffer = null
-      for (let i = 0; i < defs.length; i++) {
-        sameDocument()
-        updateProcessingStage(`${i + 1}/${defs.length} · ${labels[i]}`, docId)
-        updateProcessingProgress(i / defs.length, docId)
-        buffer = await defs[i].render(segments, start, end)
-        sameDocument()
-        segments = replaceRegionWithBuffer(segments, start, end, buffer, `chain-scratch-${i}`)
-      }
+      const buffer = await renderLive(start, end, {
+        check: sameDocument,
+        onStage: (i, label) => {
+          updateProcessingStage(`${i + 1}/${defs.length} · ${label}`, docId)
+          updateProcessingProgress(i / defs.length, docId)
+        },
+      })
       const bufferId = replaceRegion(start, end, buffer, `Chain: ${names}`, docId, pin.selection)
       setPeakCache(bufferId, await computePeakCache(buffer, 256))
       chain().setBypassed(true)
@@ -437,6 +462,8 @@ export function usePluginChain() {
     setBypassed,
     openEditor,
     applyBlocker,
+    renderBlocker,
+    renderLive,
     apply,
   }
 }

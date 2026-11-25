@@ -20,6 +20,7 @@ import { useSessionAutosave } from './composables/useSessionAutosave.js'
 import { useServerJobs } from './composables/useServerJobs.js'
 import ServerJobsNotice from './components/ServerJobsNotice.vue'
 import SharedLinkNotice from './components/SharedLinkNotice.vue'
+import ShareDialog from './components/ShareDialog.vue'
 import { useSharedLink } from './composables/useSharedLink.js'
 import { createWakeLock } from './platform/wakeLock.js'
 import { useFormFactor } from './composables/useFormFactor.js'
@@ -120,5 +121,6 @@ useBilling().start().then(result => {
   <AuthDialog v-if="authState.dialog" />
   <ServerJobsNotice />
   <SharedLinkNotice />
+  <ShareDialog />
   <ToastNotification />
 </template>

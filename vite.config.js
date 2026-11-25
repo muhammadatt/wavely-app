@@ -210,6 +210,24 @@ function marketingPages(devPanels, siteUrl) {
  * each into its own copy of the entry (`terms/index.html`, …) with the text
  * already in the HTML — readable by crawlers and with scripts off.
  */
+/**
+ * The shared before / after page (`s/index.html`, `src/listen/`) at
+ * `/s/<id>`. The ids are made by users, so there is no copy per page: dev and
+ * preview rewrite here, and production through `vercel.json`'s rewrite.
+ */
+function listenPage() {
+  const rewrite = (req, _res, next) => {
+    const path = (req.url || '').split('?')[0]
+    if (/^\/s(\/[A-Za-z0-9]*)?\/?$/.test(path)) req.url = '/s/index.html' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '')
+    next()
+  }
+  return {
+    name: 'wavely:listen-page',
+    configureServer(server) { server.middlewares.use(rewrite) },
+    configurePreviewServer(server) { server.middlewares.use(rewrite) },
+  }
+}
+
 function legalPages() {
   const rewrite = (req, _res, next) => {
     const path = (req.url || '').split('?')[0]
@@ -260,6 +278,7 @@ export default defineConfig(({ mode }) => {
       helpPages(devPanels),
       marketingPages(devPanels, env.SITE_URL),
       legalPages(),
+      listenPage(),
       vue(),
       tailwindcss(),
     ],
@@ -270,6 +289,7 @@ export default defineConfig(({ mode }) => {
           help: fileURLToPath(new URL('./help/index.html', import.meta.url)),
           effects: fileURLToPath(new URL('./effects/index.html', import.meta.url)),
           legal: fileURLToPath(new URL('./legal/index.html', import.meta.url)),
+          listen: fileURLToPath(new URL('./s/index.html', import.meta.url)),
         },
       },
     },

@@ -34,6 +34,10 @@ const props = defineProps({
   name: { type: String, required: true },
   /** The editor link that opens a sample there (`tryOutUrl`), or null for none. */
   tryHref: { type: Function, default: null },
+  /** The editor link's words. */
+  tryLabel: { type: String, default: 'Try it on this clip' },
+  /** Show the clip list (off for a page with one recording, the shared listen). */
+  showList: { type: Boolean, default: true },
 })
 
 const FADE_S = 0.025
@@ -329,8 +333,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="ab" tabindex="-1" @keydown="onKey">
-    <ol class="ab-list" aria-label="Sample clips">
+  <div class="ab" :class="{ 'ab--single': !showList }" tabindex="-1" @keydown="onKey">
+    <ol v-if="showList" class="ab-list" aria-label="Sample clips">
       <li v-for="(s, i) in samples" :key="s.id">
         <button
           type="button"
@@ -405,7 +409,7 @@ onBeforeUnmount(() => {
         <span class="ab-foot-note">{{ matchLevels ? matchNote : 'Press B to switch, space to play. Headphones recommended.' }}</span>
         <!-- Into the editor with this clip loaded and the effect open on it. -->
         <a v-if="tryHref" :href="tryHref(sample)" class="ab-try">
-          Try it on this clip
+          {{ tryLabel }}
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </a>
       </div>
@@ -420,6 +424,7 @@ onBeforeUnmount(() => {
   gap: 16px;
   outline: none;
 }
+.ab--single { grid-template-columns: 1fr; }
 .ab-list {
   list-style: none;
   margin: 0;

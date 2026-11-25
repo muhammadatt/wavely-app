@@ -47,9 +47,17 @@ export async function renderTimelineForSave(segments, docRate, channels, setting
   if (totalDuration === 0) return null
 
   const channelData = renderRegionToBuffer(segments, 0, totalDuration, docRate, channels)
-  // Transferred, not copied: the render's arrays are fresh and unused after
-  // this. A view onto a larger buffer would hand the worker more than it
-  // should own, so those are copied.
+  return encodeInWorker(channelData, docRate, settings, { onProgress })
+}
+
+/**
+ * Encode rendered samples in `encodeWorker.js` (resample, then the format).
+ * The arrays are TRANSFERRED where they own their whole buffer, so the caller
+ * must not use them afterwards; views onto a larger buffer are copied.
+ *
+ * @returns {Promise<{ bytes: Uint8Array, mime: string }>}
+ */
+export async function encodeInWorker(channelData, fromRate, settings, { onProgress } = {}) {
   const owned = channelData.map(ch => (ch.byteOffset === 0 && ch.byteLength === ch.buffer.byteLength ? ch : ch.slice()))
 
   const worker = new Worker(new URL('../workers/encodeWorker.js', import.meta.url), { type: 'module' })
@@ -61,7 +69,7 @@ export async function renderTimelineForSave(segments, docRate, channels, setting
         else reject(Object.assign(new Error(data.message ?? 'encode failed'), { name: data.name ?? 'Error' }))
       }
       worker.onerror = e => reject(new Error(e.message || 'encode worker failed'))
-      worker.postMessage({ channelData: owned, fromRate: docRate, settings }, owned.map(ch => ch.buffer))
+      worker.postMessage({ channelData: owned, fromRate, settings }, owned.map(ch => ch.buffer))
     })
   } finally {
     worker.terminate()

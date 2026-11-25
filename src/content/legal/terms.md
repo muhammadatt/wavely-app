@@ -61,6 +61,8 @@ You are responsible for activity under your account. You can delete your account
 
 **Your responsibility.** You confirm that you have the rights needed to use Your Content with the Service, and that processing it does not infringe anyone's rights or break the law.
 
+**Shared pages.** When you share a before / after, you make that audio, its title and note, and the chain's settings available to anyone with the link, who can listen, download it and open it in the editor. You give us the licence above to host and serve it for as long as the share exists, and you confirm that you have the right to share the recording (for example, that it is yours or its owner agreed). You can delete a share at any time. We may remove a share that is reported to us or that breaks these Terms.
+
 **Keep your own copies.** Files sent for server processing are deleted automatically, usually within an hour of the job finishing. Unsaved work kept in your browser can be lost if you clear its storage. We are not a backup service — keep copies of anything you care about.
 
 ## 6. Acceptable use
