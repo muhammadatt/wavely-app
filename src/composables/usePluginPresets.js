@@ -16,9 +16,12 @@
 import { computed, onUnmounted, ref } from 'vue'
 import {
   listPresets, presetParams, matchPreset, saveUserPreset, deleteUserPreset,
-  isFactoryPreset, onPresetsChanged, canSaveUserPresets,
+  isFactoryPreset, onPresetsChanged, canSaveUserPresets, pickParams,
+  PLUGIN_CHAIN_PRESET_PLUGIN,
 } from '../audio/pluginPresets/index.js'
+import { encodeShare, shareUrl } from '../audio/shareLink.js'
 import { useEntitlements } from './useEntitlements.js'
+import { useEditorState } from './useEditorState.js'
 
 export function usePluginPresets(pluginId, { read, write }) {
   /**
@@ -161,9 +164,47 @@ export function usePluginPresets(pluginId, { read, write }) {
     )
   }
 
+  /**
+   * Copy a link to the current settings (audio/shareLink.js): the whole rack
+   * for the chain's menu, the knobs for a plugin's. The settings go through
+   * the same whitelist a saved preset does, so nothing measured travels. The
+   * link is named after the lit preset unless the knobs have moved off it.
+   * Resolves to the link, or null.
+   */
+  async function copyLink() {
+    const { showToast } = useEditorState()
+    const isChain = pluginId === PLUGIN_CHAIN_PRESET_PLUGIN
+    const current = read()
+    const params = isChain ? current : pickParams(pluginId, current)
+    if (isChain && !params?.slots?.length) {
+      showToast('Add a plugin to the chain first')
+      return null
+    }
+    const name = activePreset.value && !dirty.value ? activePreset.value.name : undefined
+    let url
+    try {
+      const payload = isChain
+        ? { v: 1, kind: 'chain', name, params }
+        : { v: 1, kind: 'preset', preset: pluginId, name, params }
+      url = shareUrl(await encodeShare(payload), window.location.origin)
+    } catch (err) {
+      showToast(err?.message ?? 'Could not make a link for these settings', 5000)
+      return null
+    }
+    try {
+      await navigator.clipboard.writeText(url)
+      showToast(isChain ? 'Link to this chain copied' : 'Link to these settings copied')
+    } catch {
+      // No clipboard (an insecure origin, or the permission refused): show it.
+      window.prompt('Copy this link:', url)
+    }
+    return url
+  }
+
   return {
     presets,
     selectedId,
+    copyLink,
     activePreset,
     matchedId,
     dirty,

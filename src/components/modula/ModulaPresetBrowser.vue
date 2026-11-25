@@ -18,7 +18,7 @@
  * when there is no room below, and closes when the window moves.
  *
  * ⚠ DISABLED REFUSES ONLY WHAT CHANGES THE SOUND: selecting, stepping and
- * reverting. Saving and deleting stay available — neither touches the audio.
+ * reverting. Saving, deleting and Copy link stay available — none touches the audio.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
@@ -115,6 +115,11 @@ function commitSave() {
   }
 }
 
+function copyLink() {
+  close()
+  props.presets.copyLink()
+}
+
 function onDocPointerDown(e) {
   if (!open.value) return
   if (!trigger.value?.contains(e.target) && !list.value?.contains(e.target)) close()
@@ -185,6 +190,7 @@ onBeforeUnmount(() => {
         <button type="submit" class="m-pb-save-btn">Save</button>
       </form>
       <div v-if="error" class="m-pb-error">{{ error }}</div>
+      <div v-if="!saving" class="m-pb-item m-pb-action" title="Copy a link that opens these settings in the editor" @click="copyLink">Copy link</div>
     </div>
   </Teleport>
   </div>

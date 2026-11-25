@@ -56,43 +56,44 @@ export function captureChain(slots) {
   }
 }
 
-export function useChainPresets() {
+/**
+ * Replace the rack with a saved chain. A plugin this build cannot put in the
+ * chain (a dev-only one in production, or one since removed) is skipped and
+ * named, rather than failing the whole load. Also what a shared chain link
+ * loads (useSharedLink.js).
+ */
+export function loadChain(params) {
   const chain = usePluginChain()
   const { showToast } = useEditorState()
-
-  /**
-   * Replace the rack with a saved chain. A plugin this build cannot put in the
-   * chain (a dev-only one in production, or one since removed) is skipped and
-   * named, rather than failing the whole load.
-   */
-  function load(params) {
-    const allowed = new Set(chainPlugins().map(op => op.id))
-    chain.clear()
-    const skipped = []
-    for (const slot of params.slots ?? []) {
-      if (!allowed.has(slot.plugin) || !PLUGIN_SETTINGS[slot.plugin]) {
-        skipped.push(getOperation(slot.plugin)?.label ?? slot.plugin)
-        continue
-      }
-      const id = chain.add(slot.plugin, {
-        open: false,
-        // Builds the copy and writes its settings before it joins, so it
-        // starts playing with them rather than with the defaults.
-        prepare: (copy) => {
-          if (!writePluginSettings(slot.plugin, copy, slot.settings)) {
-            pluginSettingsIO(slot.plugin, copy)
-          }
-        },
-      })
-      if (id && slot.active === false) chain.setSlotActive(id, false)
+  const allowed = new Set(chainPlugins().map(op => op.id))
+  chain.clear()
+  const skipped = []
+  for (const slot of params.slots ?? []) {
+    if (!allowed.has(slot?.plugin) || !PLUGIN_SETTINGS[slot.plugin]) {
+      skipped.push(getOperation(slot?.plugin)?.label ?? slot?.plugin ?? 'an unknown plugin')
+      continue
     }
-    if (skipped.length) {
-      showToast(`Chain loaded without ${skipped.join(', ')} — not available in this version`)
-    }
+    const id = chain.add(slot.plugin, {
+      open: false,
+      // Builds the copy and writes its settings before it joins, so it
+      // starts playing with them rather than with the defaults.
+      prepare: (copy) => {
+        if (!writePluginSettings(slot.plugin, copy, slot.settings)) {
+          pluginSettingsIO(slot.plugin, copy)
+        }
+      },
+    })
+    if (id && slot.active === false) chain.setSlotActive(id, false)
   }
+  if (skipped.length) {
+    showToast(`Chain loaded without ${skipped.join(', ')} — not available in this version`)
+  }
+}
 
+export function useChainPresets() {
+  const chain = usePluginChain()
   return usePluginPresets(PLUGIN_CHAIN_PRESET_PLUGIN, {
     read: () => captureChain(chain.slots.value),
-    write: load,
+    write: loadChain,
   })
 }

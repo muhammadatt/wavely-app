@@ -19,6 +19,8 @@ import { useTryOut } from './composables/useTryOut.js'
 import { useSessionAutosave } from './composables/useSessionAutosave.js'
 import { useServerJobs } from './composables/useServerJobs.js'
 import ServerJobsNotice from './components/ServerJobsNotice.vue'
+import SharedLinkNotice from './components/SharedLinkNotice.vue'
+import { useSharedLink } from './composables/useSharedLink.js'
 import { createWakeLock } from './platform/wakeLock.js'
 import { useFormFactor } from './composables/useFormFactor.js'
 
@@ -40,6 +42,10 @@ const { appState, showToast, anyProcessing } = useEditorState()
 // A marketing page's "Try it on this clip" link: read now, so the clip is
 // fetching while the page loads. The empty state shows the offer.
 useTryOut()
+
+// A shared chain or preset link (`#share=…`): read now, offered on a card
+// (SharedLinkNotice) and loaded only when the user says so.
+useSharedLink()
 
 // Recovery copies of files with unsaved edits, and the offer to restore the
 // work a closed or crashed tab left (shown by the empty state).
@@ -113,5 +119,6 @@ useBilling().start().then(result => {
   <UpgradeDialog v-if="authState.upgradeFor" />
   <AuthDialog v-if="authState.dialog" />
   <ServerJobsNotice />
+  <SharedLinkNotice />
   <ToastNotification />
 </template>
