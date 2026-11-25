@@ -1,31 +1,16 @@
 <script setup>
 /**
- * The before / after player: one clip at a time, the dry and processed takes
- * playing in LOCK-STEP, and an ON / BYPASS switch that crossfades between them
- * without a gap or a jump in position — the A/B the commercial plugin pages
- * offer, on audio rendered by the real DSP (`npm run marketing:render`).
+ * The effect pages' before / after player: a list of clips and, for the one
+ * picked, the dry and processed takes in LOCK-STEP with an ON / BYPASS switch,
+ * on audio rendered by the real DSP (`npm run marketing:render`). The engine —
+ * lock-step playback, the crossfading switch, level match — is
+ * `useABPlayback` (abPlayback.js), shared with the shared listen page's plainer
+ * player (src/listen/SharePlayer.vue); this file is the page's look.
  *
- * ── HOW THE TWO STAY TOGETHER ───────────────────────────────────────────────
- * Both takes are decoded up front and started by two AudioBufferSourceNodes on
- * the SAME `when` and offset, each through its own gain; the switch only moves
- * the gains (a 25 ms equal-power fade, short enough to read as instant and long
- * enough not to click). Switching two <audio> elements cannot do this: they
- * drift, and seeking one to the other's time lands tens of ms off.
- *
- * ── AUDIOCONTEXT ON A GESTURE ───────────────────────────────────────────────
- * The waveforms are decoded on an OfflineAudioContext at load, so the page can
- * draw them; the realtime context is created on the first Play (the app's rule,
- * and the browsers' autoplay policy). An AudioBuffer belongs to no context, so
- * the decoded takes play in it as they are.
- *
- * ── LEVEL MATCH ─────────────────────────────────────────────────────────────
- * A processed voice is usually louder, and louder reads as better. "Match
- * levels" turns the louder take down by the gated-RMS difference the render
- * script measured, so a listener can judge the change and not the volume. Off
- * by default: the level is part of what the effect does.
+ * "Match levels" is off by default: the level is part of what the effect does.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { setPlaybackAudioSession, createAudioContext, resumeIfStopped } from '../platform/audioSession.js'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useABPlayback, formatClock as fmt } from './abPlayback.js'
 
 const props = defineProps({
   /** [{ id, title, text, setting, audio: { on, off, seconds, levelDb, placeholder? } }] */
@@ -36,196 +21,30 @@ const props = defineProps({
   tryHref: { type: Function, default: null },
   /** The editor link's words. */
   tryLabel: { type: String, default: 'Try it on this clip' },
-  /** Show the clip list (off for a page with one recording, the shared listen). */
+  /** Show the clip list (off for a page with one recording). */
   showList: { type: Boolean, default: true },
 })
 
-const FADE_S = 0.025
 const index = ref(0)
 const sample = computed(() => props.samples[index.value])
-const on = ref(true)
-const matchLevels = ref(false)
-const playing = ref(false)
-const loading = ref(false)
-const failed = ref(false)
-const position = ref(0)
-const duration = ref(0)
-
-/** Decoded pairs by sample id: { off, on, peaks: { off, on } }. */
-const decoded = new Map()
-let ctx = null
-let nodes = null // { srcs: [off, on], gains: [off, on] }
-let startedAt = 0 // ctx time at which offset 0 would have played
-let raf = 0
 const canvas = ref(null)
 
-const pending = new Map()
-function load(s) {
-  if (decoded.has(s.id)) return Promise.resolve(decoded.get(s.id))
-  if (pending.has(s.id)) return pending.get(s.id)
-  const decoder = new OfflineAudioContext(1, 1, 44100)
-  const one = url => fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`${url}: ${r.status}`)
-    return r.arrayBuffer()
-  }).then(b => decoder.decodeAudioData(b))
-  const p = Promise.all([one(s.audio.off), one(s.audio.on)]).then(([off, onBuf]) => {
-    const pair = { off, on: onBuf, peaks: null }
-    decoded.set(s.id, pair)
-    pending.delete(s.id)
-    return pair
-  }, (err) => {
-    // Forget the failure so the next play or sample switch fetches again.
-    pending.delete(s.id)
-    throw err
-  })
-  pending.set(s.id, p)
-  return p
-}
+const {
+  on, matchLevels, playing, loading, failed, position, duration, levelDiffDb,
+  ensureLoaded, toggle, seekTo, switchTo, peaks,
+} = useABPlayback(sample, () => draw())
 
 async function select(i) {
-  if (i === index.value && decoded.has(sample.value.id)) return
-  const wasPlaying = playing.value
-  stop()
-  index.value = i
-  position.value = 0
-  await ensureLoaded()
-  if (wasPlaying && !failed.value) play()
-}
-
-async function ensureLoaded() {
-  const s = sample.value
-  loading.value = !decoded.has(s.id)
-  failed.value = false
-  try {
-    const pair = await load(s)
-    if (s !== sample.value) return null
-    duration.value = Math.min(pair.off.duration, pair.on.duration)
-    draw()
-    return pair
-  } catch (err) {
-    console.error('Sample failed to load:', err)
-    if (s === sample.value) failed.value = true
-    return null
-  } finally {
-    if (s === sample.value) loading.value = false
-  }
-}
-
-// ── Gains ────────────────────────────────────────────────────────────────────
-
-/** The two takes' gains for the current switch and level-match state. */
-function targetGains() {
-  let trimOff = 1, trimOn = 1
-  const lv = sample.value.audio.levelDb
-  if (matchLevels.value && Number.isFinite(lv?.on) && Number.isFinite(lv?.off)) {
-    const d = lv.on - lv.off
-    if (d > 0) trimOn = 10 ** (-d / 20)
-    else trimOff = 10 ** (d / 20)
-  }
-  return on.value ? [0, trimOn] : [trimOff, 0]
+  if (i === index.value && !loading.value && duration.value) return
+  await switchTo(() => { index.value = i })
 }
 
 const matchNote = computed(() => {
-  const lv = sample.value?.audio?.levelDb
-  if (!Number.isFinite(lv?.on) || !Number.isFinite(lv?.off)) return ''
-  const d = lv.on - lv.off
+  const d = levelDiffDb.value
+  if (d == null) return ''
   if (Math.abs(d) < 0.05) return 'Both takes are already at the same level.'
   return `${d > 0 ? 'Processed' : 'Bypassed'} take turned down ${Math.abs(d).toFixed(1)} dB.`
 })
-
-function applyGains() {
-  if (!nodes) return
-  const t = ctx.currentTime
-  const target = targetGains()
-  nodes.gains.forEach((g, k) => {
-    g.gain.cancelScheduledValues(t)
-    g.gain.setValueAtTime(g.gain.value, t)
-    g.gain.linearRampToValueAtTime(target[k], t + FADE_S)
-  })
-}
-
-watch([on, matchLevels], applyGains)
-
-// ── Transport ────────────────────────────────────────────────────────────────
-
-async function play() {
-  // Create and resume the context inside the click, before anything is awaited:
-  // after a first-time fetch the gesture has expired and Safari / iOS keep the
-  // context suspended.
-  // The playback session first, so an iPhone on silent still plays the clip.
-  setPlaybackAudioSession()
-  if (!ctx) ctx = createAudioContext()
-  // 'interrupted' too: Safari's state after a call or another app's audio.
-  // Never rejects: a refusal (a call still in progress) resolves false.
-  const resumed = resumeIfStopped(ctx)
-  const pair = await ensureLoaded()
-  if (!pair) return
-  // Refused: leave the player stopped, so the next press tries again.
-  if (!(await resumed)) return
-  stopNodes()
-  const offset = position.value >= duration.value - 0.05 ? 0 : position.value
-  const when = ctx.currentTime + 0.03
-  const target = targetGains()
-  const srcs = [pair.off, pair.on].map((buf) => {
-    const s = ctx.createBufferSource()
-    s.buffer = buf
-    s.loop = true
-    s.loopEnd = duration.value
-    return s
-  })
-  const gains = srcs.map((s, k) => {
-    const g = ctx.createGain()
-    g.gain.value = target[k]
-    s.connect(g).connect(ctx.destination)
-    return g
-  })
-  srcs.forEach(s => s.start(when, offset))
-  nodes = { srcs, gains }
-  startedAt = when - offset
-  playing.value = true
-  // A seek during playback calls play() again: replace the loop, never stack one.
-  cancelAnimationFrame(raf)
-  tick()
-}
-
-function stopNodes() {
-  if (!nodes) return
-  for (const s of nodes.srcs) { try { s.stop() } catch { /* never started */ } s.disconnect() }
-  for (const g of nodes.gains) g.disconnect()
-  nodes = null
-}
-
-function stop() {
-  if (playing.value && ctx) position.value = currentPosition()
-  stopNodes()
-  playing.value = false
-  cancelAnimationFrame(raf)
-  draw()
-}
-
-function toggle() {
-  if (playing.value) stop()
-  else play()
-}
-
-function currentPosition() {
-  if (!ctx || !duration.value) return position.value
-  const t = ctx.currentTime - startedAt
-  return ((t % duration.value) + duration.value) % duration.value
-}
-
-function tick() {
-  if (!playing.value) return
-  position.value = currentPosition()
-  draw()
-  raf = requestAnimationFrame(tick)
-}
-
-function seekTo(seconds) {
-  position.value = Math.max(0, Math.min(duration.value, seconds))
-  if (playing.value) play()
-  else draw()
-}
 
 function onWaveClick(e) {
   if (!duration.value) return
@@ -247,30 +66,8 @@ function onKey(e) {
 
 // ── Waveform ─────────────────────────────────────────────────────────────────
 
-/** Min / max of the channels' mean per column. */
-function columnPeaks(buf, cols) {
-  const n = buf.length, ch = buf.numberOfChannels
-  const data = Array.from({ length: ch }, (_, c) => buf.getChannelData(c))
-  const out = new Float32Array(cols * 2)
-  for (let x = 0; x < cols; x++) {
-    const a = Math.floor((x / cols) * n), b = Math.max(a + 1, Math.floor(((x + 1) / cols) * n))
-    let lo = 0, hi = 0
-    for (let i = a; i < b; i++) {
-      let v = 0
-      for (let c = 0; c < ch; c++) v += data[c][i]
-      v /= ch
-      if (v < lo) lo = v
-      if (v > hi) hi = v
-    }
-    out[2 * x] = lo
-    out[2 * x + 1] = hi
-  }
-  return out
-}
-
 function draw() {
   const el = canvas.value
-  const pair = sample.value && decoded.get(sample.value.id)
   if (!el) return
   const dpr = window.devicePixelRatio || 1
   const w = el.clientWidth, h = el.clientHeight
@@ -281,16 +78,14 @@ function draw() {
   const g = el.getContext('2d')
   g.setTransform(dpr, 0, 0, dpr, 0, 0)
   g.clearRect(0, 0, w, h)
-  if (!pair) return
   const cols = Math.max(1, Math.floor(w / 2))
-  if (!pair.peaks || pair.peaks.cols !== cols) {
-    pair.peaks = { cols, off: columnPeaks(pair.off, cols), on: columnPeaks(pair.on, cols) }
-  }
+  const pk = peaks(cols)
+  if (!pk) return
   const mid = h / 2, scale = h * 0.46
   const played = duration.value ? position.value / duration.value : 0
-  const bars = (peaks, color, playedColor) => {
+  const bars = (data, color, playedColor) => {
     for (let x = 0; x < cols; x++) {
-      const lo = peaks[2 * x], hi = peaks[2 * x + 1]
+      const lo = data[2 * x], hi = data[2 * x + 1]
       const y0 = mid - hi * scale, y1 = mid - lo * scale
       g.fillStyle = x / cols < played ? playedColor : color
       g.fillRect(x * 2, y0, 1.4, Math.max(1, y1 - y0))
@@ -301,22 +96,15 @@ function draw() {
   const accent = css.getPropertyValue('--mk-accent').trim() || '#35d3e6'
   const ghost = 'rgba(234, 246, 248, 0.16)'
   if (on.value) {
-    bars(pair.peaks.off, ghost, ghost)
-    bars(pair.peaks.on, `${accent}66`, accent)
+    bars(pk.off, ghost, ghost)
+    bars(pk.on, `${accent}66`, accent)
   } else {
-    bars(pair.peaks.on, ghost, ghost)
-    bars(pair.peaks.off, 'rgba(234, 246, 248, 0.38)', 'rgba(234, 246, 248, 0.85)')
+    bars(pk.on, ghost, ghost)
+    bars(pk.off, 'rgba(234, 246, 248, 0.38)', 'rgba(234, 246, 248, 0.85)')
   }
   const px = played * w
   g.fillStyle = '#ffffff'
   g.fillRect(Math.round(px), 0, 1, h)
-}
-
-watch(on, draw)
-
-function fmt(t) {
-  const s = Math.max(0, Math.floor(t))
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
 let ro = null
@@ -326,9 +114,7 @@ onMounted(() => {
   if (canvas.value) ro.observe(canvas.value)
 })
 onBeforeUnmount(() => {
-  stop()
   ro?.disconnect()
-  ctx?.close()
 })
 </script>
 
