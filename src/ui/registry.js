@@ -14,6 +14,7 @@ import AirBandModal from '../components/panels/AirBandModal.vue'
 import SaturationBenchModal from '../components/panels/SaturationBenchModal.vue'
 import ResonanceModal from '../components/panels/ResonanceModal.vue'
 import HumRemoverModal from '../components/panels/HumRemoverModal.vue'
+import DenoiserModal from '../components/panels/DenoiserModal.vue'
 import NoiseReductionModal from '../components/panels/NoiseReductionModal.vue'
 import SibilanceEditorModal from '../components/panels/SibilanceEditorModal.vue'
 import DeEsserModal from '../components/panels/DeEsserModal.vue'
@@ -565,6 +566,22 @@ const ALL_OPERATIONS = [
     offline: true,
     surface: 'window',
     component: NoiseReductionModal,
+  },
+  {
+    // PROTOTYPE: a noise-profile spectral denoiser (MMSE-LSA) that runs in the
+    // browser with no server call — the free counterpart to Noise Reduction
+    // above for steady noise (hiss, fans, room tone). Not chainable yet.
+    id: 'spectral-denoise',
+    release: 'dev',
+    label: 'Spectral Denoise',
+    desc: 'Remove steady hiss',
+    category: 'clean',
+    group: 'Noise',
+    icon: 'noise',
+    keywords: ['denoise', 'noise', 'hiss', 'background', 'room tone', 'fan', 'hvac', 'spectral', 'noise profile', 'clean', 'browser'],
+    requires: 'selection',
+    surface: 'window',
+    component: DenoiserModal,
   },
   {
     // The real-time de-esser: dips the top end only while a consonant spikes.

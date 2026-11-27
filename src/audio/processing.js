@@ -108,6 +108,9 @@ import {
   toKernelParams as toManualEqKernelParams,
 } from './effects/manualEq.js'
 import { MAX_ANALYSIS_SECONDS as HUM_MAX_ANALYSIS_SECONDS } from './dsp/humDetect.js'
+import { ensureDenoiserWorklet } from './denoiserWorkletLoader.js'
+import { DENOISER_LATENCY_SAMPLES, DENOISER_PREROLL_S } from './denoiserProcessor.js'
+import { DENOISER_DEFAULTS, toKernelParams as toDenoiserKernelParams } from './effects/denoiser.js'
 
 /**
  * Render a region of the timeline to a flat PCM buffer.
@@ -1563,6 +1566,66 @@ export function analyzeHumRegion(segments, start, end, sampleRate, channels, opt
       reject(err)
     }
     worker.postMessage({ samples: mono, sampleRate, options }, [mono.buffer])
+  })
+}
+
+/** Most audio a noise-profile pass reads: ten minutes, in 20 spread blocks past that. */
+export const NOISE_PROFILE_MAX_S = 600
+const NOISE_PROFILE_BLOCKS = 20
+
+/**
+ * Learn a Spectral Denoise noise profile from [start, end) of the timeline.
+ *
+ * `mode` 'auto' takes the quietest frames (the pauses, on speech); 'all' takes
+ * every non-silent frame, for a selection the user says is room tone. Read on
+ * the channel MEAN, which is what the kernel decides its gain on. Past ten
+ * minutes, 20 blocks spread over the region (voiceProfileSpans) — the joins
+ * cost one frame each.
+ *
+ * @returns {Promise<object>} learnNoiseProfile()'s result — see dsp/spectralDenoise.js
+ */
+export function learnNoiseProfileRegion(segments, start, end, sampleRate, channels, { mode = 'auto' } = {}) {
+  const spans = voiceProfileSpans(start, end, NOISE_PROFILE_MAX_S, NOISE_PROFILE_BLOCKS)
+  const parts = spans.map(sp => renderRegionToBuffer(segments, sp.start, sp.end, sampleRate, channels))
+  const joined = concatChannelParts(parts, channels)
+  const n = joined[0]?.length ?? 0
+  const mono = new Float32Array(n)
+  for (const ch of joined) for (let i = 0; i < n; i++) mono[i] += ch[i]
+  if (channels > 1) {
+    const scale = 1 / channels
+    for (let i = 0; i < n; i++) mono[i] *= scale
+  }
+
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      new URL('../workers/noiseProfileWorker.js', import.meta.url),
+      { type: 'module' },
+    )
+    worker.onmessage = (e) => {
+      worker.terminate()
+      if (e.data.type === 'done') resolve(e.data.result)
+      else reject(new Error(e.data.message))
+    }
+    worker.onerror = (err) => {
+      worker.terminate()
+      reject(err)
+    }
+    worker.postMessage({ samples: mono, options: { mode } }, [mono.buffer])
+  })
+}
+
+/**
+ * Apply Spectral Denoise to a region. The STFT delays the output by one frame,
+ * rendered long and trimmed; a second of pre-roll lets the decision-directed
+ * estimate settle as it has in the preview. Not chunked (prototype).
+ */
+export function applyDenoiserRegion(segments, start, end, params, sampleRate, channels) {
+  return applyWorkletRegion(segments, start, end, sampleRate, channels, {
+    ensureWorklet: ensureDenoiserWorklet,
+    processorName: 'denoiser-processor',
+    kernelParams: toDenoiserKernelParams({ ...DENOISER_DEFAULTS, ...params }),
+    latencySamples: DENOISER_LATENCY_SAMPLES,
+    preRollSamples: DENOISER_PREROLL_S * sampleRate,
   })
 }
 

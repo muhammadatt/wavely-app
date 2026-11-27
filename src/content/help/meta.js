@@ -53,6 +53,7 @@ export const HELP_META = {
   'hf-limiter': { title: 'Hi-Freq Limiter', category: 'clean' },
   'resonance-suppressor': { title: 'Reso Tame', category: 'tone', oldSlugs: ['reso-soothe'] },
   plosive: { title: 'Plosive Tamer', category: 'clean', release: 'dev' },
+  'spectral-denoise': { title: 'Spectral Denoise', category: 'clean', release: 'dev' },
   'hum-remover': { title: 'Hum Remover', category: 'clean' },
   'spectrum-analyzer': { title: 'Spectrum Analyzer', category: 'clean' },
   'plugin-chain': { title: 'Effect Chain', category: null },

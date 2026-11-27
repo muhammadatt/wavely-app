@@ -91,6 +91,7 @@ import fetPunch from './fet-punch.js'
 import hfLimiter from './hf-limiter.js'
 import deEsser from './de-esser.js'
 import humRemover from './hum-remover.js'
+import spectralDenoise from './spectral-denoise.js'
 import loudness from './loudness.js'
 import manualEq from './manual-eq.js'
 import noiseReduction from './noise-reduction.js'
@@ -118,6 +119,7 @@ export const HELP = {
   'hf-limiter': hfLimiter,
   'de-esser': deEsser,
   'hum-remover': humRemover,
+  'spectral-denoise': spectralDenoise,
   loudness,
   'manual-eq': manualEq,
   'noise-reduction': noiseReduction,

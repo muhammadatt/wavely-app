@@ -39,7 +39,7 @@ const URL_ = `http://localhost:${PORT}/`
 const PANELS = [
   'LA Vintage 2A', 'LA Classic 76', 'Soft Clipper', 'Scheps Parallel',
   'Reso Soothe', 'EQ', 'Air Boost', 'De-Esser', 'Hi-Freq Limiter', 'PHATaSS', 'Saturation Bench', 'Cambridge Inflator', 'Tube Sat',
-  'Loudness Normalize', 'Auto Leveler', 'Plosive Tamer', 'Noise Reduction', 'VoxPressor',
+  'Loudness Normalize', 'Auto Leveler', 'Plosive Tamer', 'Noise Reduction', 'Spectral Denoise', 'VoxPressor',
 ]
 
 function writeProbeWav(path) {

@@ -1,0 +1,171 @@
+{
+  "panel": {
+    "src": "/help/shots/spectral-denoise/panel.jpg",
+    "w": 720,
+    "h": 582,
+    "radius": 22
+  },
+  "controls": {
+    "in-meter": {
+      "src": "/help/shots/spectral-denoise/in-meter.png",
+      "w": 68,
+      "h": 293,
+      "at": {
+        "x": 24,
+        "y": 84,
+        "w": 56,
+        "h": 281
+      }
+    },
+    "spectrum": {
+      "src": "/help/shots/spectral-denoise/spectrum.png",
+      "w": 520,
+      "h": 193,
+      "at": {
+        "x": 106,
+        "y": 84,
+        "w": 508,
+        "h": 181
+      }
+    },
+    "removed": {
+      "src": "/help/shots/spectral-denoise/removed.png",
+      "w": 99,
+      "h": 21,
+      "at": {
+        "x": 519,
+        "y": 248,
+        "w": 87,
+        "h": 9
+      }
+    },
+    "status": {
+      "src": "/help/shots/spectral-denoise/status.png",
+      "w": 370,
+      "h": 27,
+      "at": {
+        "x": 106,
+        "y": 285,
+        "w": 358,
+        "h": 15
+      }
+    },
+    "learn": {
+      "src": "/help/shots/spectral-denoise/learn.png",
+      "w": 80,
+      "h": 48,
+      "at": {
+        "x": 474,
+        "y": 275,
+        "w": 68,
+        "h": 36
+      }
+    },
+    "relearn": {
+      "src": "/help/shots/spectral-denoise/relearn.png",
+      "w": 74,
+      "h": 48,
+      "at": {
+        "x": 552,
+        "y": 275,
+        "w": 62,
+        "h": 36
+      }
+    },
+    "out-meter": {
+      "src": "/help/shots/spectral-denoise/out-meter.png",
+      "w": 68,
+      "h": 293,
+      "at": {
+        "x": 641,
+        "y": 84,
+        "w": 56,
+        "h": 281
+      }
+    },
+    "reduction": {
+      "src": "/help/shots/spectral-denoise/reduction.png",
+      "w": 84,
+      "h": 107,
+      "at": {
+        "x": 417,
+        "y": 403,
+        "w": 72,
+        "h": 95
+      }
+    },
+    "threshold": {
+      "src": "/help/shots/spectral-denoise/threshold.png",
+      "w": 86,
+      "h": 107,
+      "at": {
+        "x": 515,
+        "y": 403,
+        "w": 74,
+        "h": 95
+      }
+    },
+    "smoothing": {
+      "src": "/help/shots/spectral-denoise/smoothing.png",
+      "w": 87,
+      "h": 107,
+      "at": {
+        "x": 615,
+        "y": 403,
+        "w": 75,
+        "h": 95
+      }
+    },
+    "delta": {
+      "src": "/help/shots/spectral-denoise/delta.png",
+      "w": 91,
+      "h": 42,
+      "at": {
+        "x": 460,
+        "y": 15,
+        "w": 79,
+        "h": 30
+      }
+    },
+    "bypass": {
+      "src": "/help/shots/spectral-denoise/bypass.png",
+      "w": 71,
+      "h": 42,
+      "at": {
+        "x": 586,
+        "y": 15,
+        "w": 59,
+        "h": 30
+      }
+    },
+    "preview": {
+      "src": "/help/shots/spectral-denoise/preview.png",
+      "w": 84,
+      "h": 44,
+      "at": {
+        "x": 470,
+        "y": 537,
+        "w": 72,
+        "h": 32
+      }
+    },
+    "apply": {
+      "src": "/help/shots/spectral-denoise/apply.png",
+      "w": 166,
+      "h": 44,
+      "at": {
+        "x": 550,
+        "y": 537,
+        "w": 154,
+        "h": 32
+      }
+    }
+  },
+  "face": {
+    "src": "/help/shots/spectral-denoise/face.jpg",
+    "w": 720,
+    "h": 464,
+    "x": 0,
+    "y": 58
+  }
+}

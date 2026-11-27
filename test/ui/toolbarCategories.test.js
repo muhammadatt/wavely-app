@@ -41,6 +41,7 @@ test('every operation sits in its menu, in order', () => {
     tone: ['manual-eq', 'voicerx', 'air-band', 'resonance-suppressor', 'phatass', 'vocal-saturation', 'saturation-bench'],
     clean: [
       'Noise: noise-reduction',
+      'Noise: spectral-denoise',
       'Harshness: de-esser', 'Harshness: clip-gain-deesser', 'Harshness: hf-limiter',
       'Pops & Hum: plosive', 'Pops & Hum: hum-remover',
       'Analysis: spectrum-analyzer', 'Analysis: modula-kit',
