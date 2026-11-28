@@ -231,6 +231,63 @@ export function chainWindowUnmounted(windowId) {
   if (isChainCopyId(def.id) && !isMember(def.id)) disposeCopy(def)
 }
 
+/**
+ * What a slot HEARS: the chain renders each slot on the output of the live
+ * slots ahead of it, so a plugin that learns something from its input (Spectral
+ * Denoise's noise profile) must learn it through them, as a DAW insert learns
+ * from whatever reaches it. Empty for a plugin that is not in the chain (a
+ * solo copy), so it learns from the file itself.
+ */
+export function upstreamDefs(id) {
+  const at = slots.value.findIndex(s => s.id === id)
+  if (at <= 0) return []
+  return slots.value.slice(0, at)
+    .filter(s => s.active)
+    .map(s => plugins.get(s.id))
+    .filter(Boolean)
+}
+
+/**
+ * `segments` with [start, end) rendered through the live slots ahead of `id`,
+ * exactly as the chain's Apply would hand it to that slot — a scratch segment
+ * list, never the document's. `segments` unchanged when nothing is ahead.
+ * `onStep(i, n, label)` reports progress.
+ */
+export async function renderUpstream(id, segments, start, end, onStep) {
+  const defs = upstreamDefs(id)
+  let segs = segments
+  for (let i = 0; i < defs.length; i++) {
+    onStep?.(i, defs.length, defs[i].label)
+    const buffer = await defs[i].render(segs, start, end)
+    segs = replaceRegionWithBuffer(segs, start, end, buffer, `upstream-scratch-${id}-${i}`)
+  }
+  return segs
+}
+
+/**
+ * Reads a slot's settings as a plain object (`{ read }`), or null. Installed by
+ * useChainPresets.js, which already resolves one per slot outside any
+ * computed; injected rather than imported because pluginSettings.js imports
+ * every plugin composable, and a composable importing it back would be a cycle.
+ */
+let slotReader = () => null
+export function setSlotSettingsReader(fn) {
+  slotReader = fn
+}
+
+/**
+ * A string that changes whenever what reaches slot `id` could change: the live
+ * slots ahead of it, in order, with their settings. Reactive (it reads `slots`
+ * and the settings refs), and safe inside a computed — it builds nothing.
+ */
+export function upstreamSignature(id) {
+  const at = slots.value.findIndex(s => s.id === id)
+  if (at <= 0) return ''
+  return JSON.stringify(slots.value.slice(0, at)
+    .filter(s => s.active)
+    .map(s => [s.id, slotReader(s.id)?.read() ?? null]))
+}
+
 export function usePluginChain() {
   const editor = useEditorState()
   const {

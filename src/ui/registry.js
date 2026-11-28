@@ -570,7 +570,8 @@ const ALL_OPERATIONS = [
   {
     // PROTOTYPE: a noise-profile spectral denoiser (MMSE-LSA) that runs in the
     // browser with no server call — the free counterpart to Noise Reduction
-    // above for steady noise (hiss, fans, room tone). Not chainable yet.
+    // above for steady noise (hiss, fans, room tone). In the chain a slot
+    // learns its noise from what the slots ahead of it produce.
     id: 'spectral-denoise',
     release: 'dev',
     label: 'Spectral Denoise',
@@ -580,6 +581,8 @@ const ALL_OPERATIONS = [
     icon: 'noise',
     keywords: ['denoise', 'noise', 'hiss', 'background', 'room tone', 'fan', 'hvac', 'spectral', 'noise profile', 'clean', 'browser'],
     requires: 'selection',
+    // Runs live in the playback chain, so it can take a slot — see chainPlugins().
+    chain: true,
     surface: 'window',
     component: DenoiserModal,
   },

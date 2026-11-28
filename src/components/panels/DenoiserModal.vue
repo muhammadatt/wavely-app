@@ -46,14 +46,18 @@ const sampleRate = computed(() => state.currentFile?.sampleRate ?? 44100)
 const statusLine = computed(() => {
   const st = profileStatus.value
   const db = v => `${Math.round(v)} dBFS`
+  // Where the profile was heard: through the slots ahead of this one, in the chain.
+  const through = labels => (labels?.length ? `, after ${labels.join(' → ')}` : '')
   switch (st.kind) {
-    case 'learning': return 'Learning the noise…'
+    case 'learning': return st.step ? `Learning the noise — rendering ${st.step}…` : 'Learning the noise…'
     case 'none': return 'Turn the plugin on to learn the noise from the file’s pauses, or select room tone and press Learn.'
+    case 'stale':
+      return 'The plugins before this one have changed since the noise was learned. Press Auto or Learn to learn it again.'
     case 'weak':
-      return `Noise ${db(st.noiseDb)}, only ${Math.round(st.gapDb)} dB under the speech: the file may have few clean pauses. Select a stretch of room tone and press Learn.`
+      return `Noise ${db(st.noiseDb)}${through(st.upstreamLabels)}, only ${Math.round(st.gapDb)} dB under the speech: the file may have few clean pauses. Select a stretch of room tone and press Learn.`
     default: {
       const from = st.source === 'selection' ? 'the selection' : 'the file’s pauses'
-      return `Noise learned from ${from}: ${db(st.noiseDb)}, ${Math.round(st.gapDb)} dB under the speech.`
+      return `Noise learned from ${from}${through(st.upstreamLabels)}: ${db(st.noiseDb)}, ${Math.round(st.gapDb)} dB under the speech.`
     }
   }
 })
@@ -117,7 +121,7 @@ const fmtPct = v => `${Math.round(v)}`
         </div>
 
         <div class="dn-profile">
-          <p class="dn-status" data-help="status" :class="{ 'is-warn': profileStatus.kind === 'weak' }">{{ statusLine }}</p>
+          <p class="dn-status" data-help="status" :class="{ 'is-warn': profileStatus.kind === 'weak' || profileStatus.kind === 'stale' }">{{ statusLine }}</p>
           <ModulaButton
             data-help="learn"
             variant="accent"

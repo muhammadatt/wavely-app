@@ -1,7 +1,9 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useEditorState, DocumentSwitchedError } from './useEditorState.js'
 import { useWindows } from './useWindows.js'
-import { registerChainPlugin } from './usePluginChain.js'
+import {
+  registerChainPlugin, renderUpstream, upstreamDefs, upstreamSignature,
+} from './usePluginChain.js'
 import { pluginCopies, effectForCopy, idForCopy } from './pluginCopies.js'
 import {
   applyDenoiserRegion, learnNoiseProfileRegion, computePeakCache, NOISE_PROFILE_MAX_S,
@@ -32,8 +34,17 @@ export const PROFILE_GAP_WARN_DB = 12
  * selection when the user marks it as room tone ('selection'). It is kept per
  * document, so switching tabs does not denoise one file with another's noise.
  *
- * One copy only: it does not take a Plugin Chain slot (no `chain: true`). It
- * still registers with the chain so closing its window turns its audition off.
+ * IN THE CHAIN, A SLOT LEARNS FROM WHAT REACHES IT, the way a DAW insert's
+ * Learn hears whatever the plugins ahead of it produce: the learn spans are
+ * rendered through the live slots ahead of it first (usePluginChain's
+ * renderUpstream — the same renders the chain's Apply runs), then learned. The
+ * profile is then FROZEN: preview and Apply both use it, so what is heard is
+ * what is written. A signature of those upstream slots (order, ON / BYPASS,
+ * settings) is stored with it; when it no longer matches, the status says the
+ * profile is out of date and offers to learn again — nothing re-learns behind
+ * the user's back, and Apply still uses the stored profile (a DAW renders with
+ * the profile it holds). The solo copy has nothing ahead of it and learns from
+ * the file.
  */
 const copies = pluginCopies((copy, life) => {
   const effect = effectForCopy(soloDenoiserEffect, copy)
@@ -46,12 +57,16 @@ const copies = pluginCopies((copy, life) => {
   const engaged = ref(false)
   const delta = ref(false)
   const learning = ref(false)
+  /** While learning through the slots ahead: 'LA Vintage 2A (1/2)' etc., else ''. */
+  const learningStep = ref('')
 
   /** docId → { profile: Float32Array, info } */
   const profiles = new Map()
   /** The active document's profile, or null. */
   const profile = shallowRef(null)
-  const profileInfo = ref(null) // { source, noiseDb, speechDb, gapDb, frames, seconds, sampleRate }
+  // { source, noiseDb, speechDb, gapDb, frames, seconds, sampleRate,
+  //   upstream (signature at learn time), upstreamLabels }
+  const profileInfo = ref(null)
 
   const inputLevels = ref([])
   const outputLevels = ref([])
@@ -92,12 +107,14 @@ const copies = pluginCopies((copy, life) => {
 
     /**
      * Where the profile stands, as structured state; the panel words it.
-     * 'learning' | 'none' | 'weak' (little gap between noise and speech) | 'ok'
+     * 'learning' | 'none' | 'stale' (the slots ahead changed since it was
+     * learned) | 'weak' (little gap between noise and speech) | 'ok'
      */
     const profileStatus = computed(() => {
-      if (learning.value) return { kind: 'learning' }
+      if (learning.value) return { kind: 'learning', step: learningStep.value }
       const info = profileInfo.value
       if (!info) return { kind: 'none' }
+      if ((info.upstream ?? '') !== upstreamSignature(effect.id)) return { kind: 'stale', ...info }
       if (info.source === 'auto' && info.gapDb < PROFILE_GAP_WARN_DB) return { kind: 'weak', ...info }
       return { kind: 'ok', ...info }
     })
@@ -174,7 +191,12 @@ const copies = pluginCopies((copy, life) => {
         pushAllParams(chain)
         startMeters(chain)
         // First time on for this file: learn from the whole file's pauses.
-        if (!profile.value && !learning.value) learn('auto')
+        // A tick later: the chain switches a new slot ON before it puts it in
+        // the rack (usePluginChain's addDef), and learning now would hear none
+        // of the slots ahead of it.
+        setTimeout(() => {
+          if (engaged.value && !profile.value && !learning.value) learn('auto')
+        }, 0)
       } else {
         if (delta.value) toggleDelta()
         stopMeters()
@@ -206,11 +228,23 @@ const copies = pluginCopies((copy, life) => {
         if (!state.selection) return
         ;({ start, end } = state.selection)
       }
+      // What reaches this slot, read BEFORE the render: a knob turned upstream
+      // while it runs then shows the profile as out of date, as it is.
+      const upstream = upstreamSignature(effect.id)
+      const upstreamLabels = upstreamDefs(effect.id).map(d => d.label)
+      const segments = state.segments
       learning.value = true
+      learningStep.value = ''
       try {
         const result = await learnNoiseProfileRegion(
-          state.segments, start, end, sampleRate, channels,
-          { mode: source === 'selection' ? 'all' : 'auto' },
+          segments, start, end, sampleRate, channels,
+          {
+            mode: source === 'selection' ? 'all' : 'auto',
+            renderSpan: upstreamLabels.length === 0 ? null : (a, b, i, n) => renderUpstream(
+              effect.id, segments, a, b,
+              (k, m, label) => { learningStep.value = n > 1 ? `${label} · ${i + 1}/${n}` : label },
+            ),
+          },
         )
         if (!result.ok) {
           showToast(result.reason === 'too-short'
@@ -226,7 +260,13 @@ const copies = pluginCopies((copy, life) => {
           frames: result.frames,
           seconds: Math.min(end - start, NOISE_PROFILE_MAX_S),
           sampleRate,
+          upstream,
+          upstreamLabels,
         }
+        // Learned through the slots ahead, the renders read the ACTIVE file's
+        // rate and channels as they ran: a switch away mid-learn makes the
+        // result a mixture, so it is dropped (the next turn-on learns again).
+        if (upstreamLabels.length > 0 && appState.activeDocumentId !== docId) return
         profiles.set(docId, { profile: result.profile, info })
         // The user may have switched tabs while it ran: only show it if it is theirs.
         if (appState.activeDocumentId === docId) {
@@ -239,6 +279,7 @@ const copies = pluginCopies((copy, life) => {
         showToast('Could not learn the noise profile')
       } finally {
         learning.value = false
+        learningStep.value = ''
       }
     }
 
@@ -305,11 +346,15 @@ const copies = pluginCopies((copy, life) => {
       render: renderRegion,
       resume: () => { syncActiveProfile(); startMeters(initChain()) },
       suspend: teardown,
+      // The chain's Apply renders with the stored profile; it cannot learn one
+      // mid-render, since learning hears the slots ahead, which are rendering.
+      unavailable: () => (learning.value ? 'still learning the noise'
+        : profile.value ? '' : 'learn the noise first'),
     })
 
     return {
       reduction, threshold, smoothing,
-      engaged, delta, learning,
+      engaged, delta, learning, learningStep,
       profile, profileInfo, profileStatus, profileBandsDb,
       inputLevels, outputLevels, reductionDb, inBandsDb, outBandsDb,
       hasSelection,

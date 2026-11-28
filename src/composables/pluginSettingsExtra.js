@@ -27,6 +27,7 @@ import { useHumRemover } from './useHumRemover.js'
 import { useSibilanceEditor } from './useSibilanceEditor.js'
 import { useVocalSaturation } from './useVocalSaturation.js'
 import { useVoiceRx } from './useVoiceRx.js'
+import { useDenoiser } from './useDenoiser.js'
 import { LIMITER_MODES } from '../audio/effects/softClipperParams.js'
 import {
   SOFT_CLIPPER_MAKEUP_MIN_DB, SOFT_CLIPPER_MAKEUP_MAX_DB,
@@ -270,6 +271,32 @@ export function voiceRxSettings() {
   return { read: () => ({}), write: () => {} }
 }
 
+// ── Spectral Denoise ────────────────────────────────────────────────────────
+
+/**
+ * Stored: Reduction, Threshold and Smoothing, in the panel's travel.
+ *
+ * ⚠ THE NOISE PROFILE IS NOT STORED. It is a measurement of one recording —
+ * and, in the chain, of what the slots ahead produced from it. A restored slot
+ * learns its own when it is switched on, as a new slot does. DELTA is a monitor.
+ */
+export function denoiserSettings(api) {
+  return {
+    read: () => ({
+      reduction: api.reduction.value,
+      threshold: api.threshold.value,
+      smoothing: api.smoothing.value,
+    }),
+    write: (raw) => {
+      writeFields(asObject(raw), [
+        ['reduction', [0, 40], api.setReduction],
+        ['threshold', [-6, 12], api.setThreshold],
+        ['smoothing', [0, 100], api.setSmoothing],
+      ])
+    },
+  }
+}
+
 /** Keyed by the plugin's registry id (its solo window id, src/ui/registry.js). */
 export const EXTRA_PLUGIN_SETTINGS = {
   'soft-clipper': { use: useSoftClipper, io: softClipperSettings },
@@ -278,4 +305,5 @@ export const EXTRA_PLUGIN_SETTINGS = {
   'clip-gain-deesser': { use: useSibilanceEditor, io: sibilanceEditorSettings },
   'vocal-saturation': { use: useVocalSaturation, io: vocalSaturationSettings },
   'voicerx': { use: useVoiceRx, io: voiceRxSettings },
+  'spectral-denoise': { use: useDenoiser, io: denoiserSettings },
 }

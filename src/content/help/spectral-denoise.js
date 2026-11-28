@@ -36,9 +36,10 @@ export default {
     {
       label: 'Status line',
       shot: 'status',
-      text: 'Says where the noise profile came from, how loud the noise is, and how far it sits under the speech.',
+      text: 'Says where the noise profile came from, how loud the noise is, and how far it sits under the speech. In the Effect Chain it also names the effects the noise was heard through.',
       details: [
         'If the noise sits less than 12 dB under the speech, the file may have few clean pauses, and the line suggests learning from a selection of room tone.',
+        'In the Effect Chain, it turns amber when the effects before this one have changed since the noise was learned.',
       ],
     },
     {
@@ -89,6 +90,7 @@ export default {
   ],
 
   notes: [
+    'In the Effect Chain, it learns the noise as it sounds after the effects before it, then keeps that profile for preview and Apply. If you change those effects, the status line says so: press Auto or Learn to learn again. Put it first in the chain for the best result, before any compressor.',
     'The profile is kept for each open file, so every tab is cleaned with its own noise.',
     'Everything runs on your device. Nothing is uploaded.',
   ],

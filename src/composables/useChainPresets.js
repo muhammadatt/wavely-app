@@ -1,5 +1,5 @@
 import { effectScope, watch } from 'vue'
-import { usePluginChain } from './usePluginChain.js'
+import { usePluginChain, setSlotSettingsReader } from './usePluginChain.js'
 import { usePluginPresets } from './usePluginPresets.js'
 import { useEditorState } from './useEditorState.js'
 import { baseId, copyOfId } from './pluginCopies.js'
@@ -28,6 +28,8 @@ import { PLUGIN_CHAIN_PRESET_PLUGIN } from '../audio/pluginPresets/index.js'
 
 // Slot id → its settings reader. App-lifetime state, like the chain itself.
 const readers = new Map()
+// What a slot hears depends on these too (usePluginChain's upstreamSignature).
+setSlotSettingsReader(id => readers.get(id) ?? null)
 
 effectScope(true).run(() => {
   const { slots } = usePluginChain()

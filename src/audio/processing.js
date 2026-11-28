@@ -1580,13 +1580,23 @@ const NOISE_PROFILE_BLOCKS = 20
  * every non-silent frame, for a selection the user says is room tone. Read on
  * the channel MEAN, which is what the kernel decides its gain on. Past ten
  * minutes, 20 blocks spread over the region (voiceProfileSpans) — the joins
- * cost one frame each.
+ * cost one frame each. `renderSpan`, when given, supplies each span's audio.
  *
  * @returns {Promise<object>} learnNoiseProfile()'s result — see dsp/spectralDenoise.js
  */
-export function learnNoiseProfileRegion(segments, start, end, sampleRate, channels, { mode = 'auto' } = {}) {
+export async function learnNoiseProfileRegion(
+  segments, start, end, sampleRate, channels, { mode = 'auto', renderSpan = null } = {},
+) {
   const spans = voiceProfileSpans(start, end, NOISE_PROFILE_MAX_S, NOISE_PROFILE_BLOCKS)
-  const parts = spans.map(sp => renderRegionToBuffer(segments, sp.start, sp.end, sampleRate, channels))
+  // `renderSpan(start, end, index, count)` hands back the segment list to read
+  // a span from — a chain slot's upstream render (usePluginChain's
+  // renderUpstream), so the profile is learned on what reaches that slot.
+  const parts = []
+  for (let i = 0; i < spans.length; i++) {
+    const sp = spans[i]
+    const segs = renderSpan ? await renderSpan(sp.start, sp.end, i, spans.length) : segments
+    parts.push(renderRegionToBuffer(segs, sp.start, sp.end, sampleRate, channels))
+  }
   const joined = concatChannelParts(parts, channels)
   const n = joined[0]?.length ?? 0
   const mono = new Float32Array(n)

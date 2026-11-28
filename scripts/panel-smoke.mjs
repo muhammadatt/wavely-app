@@ -310,6 +310,71 @@ try {
   }
 
   /**
+   * Spectral Denoise in the chain learns its noise from what the slots ahead of
+   * it produce (usePluginChain's renderUpstream), keeps that profile frozen,
+   * and says so when the slots ahead change (upstreamSignature) — through a
+   * slot's ON / BYPASS and through its settings alike. Needs live chain nodes.
+   */
+  {
+    const before = errors.length
+    const openOp = async (name) => {
+      await page.keyboard.press('Control+k'); await page.waitForTimeout(250)
+      await page.keyboard.type(name); await page.waitForTimeout(450)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(1500)
+    }
+    const chainWin = page.locator('.win-frame').filter({ hasText: 'EFFECT CHAIN' })
+    const dnWin = page.locator('.win-frame').filter({ hasText: 'SPECTRAL' })
+    const addFromPicker = async (label) => {
+      await chainWin.getByRole('button', { name: 'Add effect', exact: true }).dispatchEvent('click'); await page.waitForTimeout(300)
+      await page.keyboard.type(label); await page.waitForTimeout(250)
+      await page.keyboard.press('Enter'); await page.waitForTimeout(2000)
+    }
+    const status = async () => ((await dnWin.locator('.dn-status').innerText().catch(() => '')) || '').trim()
+    const learned = async () => {
+      for (let i = 0; i < 60; i++) {
+        const t = await status()
+        if (t && !/Learning/.test(t)) return t
+        await page.waitForTimeout(500)
+      }
+      return await status()
+    }
+    let heard = '', stale = '', back = '', knob = ''
+    try {
+      await openOp('Effect Chain')
+      await addFromPicker('Air Boost')
+      await addFromPicker('Spectral Denoise')
+      heard = await learned()
+      const lamp = chainWin.locator('.pc-row').first().locator('button').filter({ hasText: /ON|BYPASS/ }).first()
+      await lamp.dispatchEvent('click'); await page.waitForTimeout(400)
+      stale = await status()
+      await lamp.dispatchEvent('click'); await page.waitForTimeout(400)
+      back = await status()
+      await chainWin.locator('.pc-name').first().dispatchEvent('click'); await page.waitForTimeout(1200)
+      const air = page.locator('.win-frame').filter({ hasText: /AIR/ })
+        .filter({ hasNotText: 'EFFECT CHAIN' }).filter({ hasNotText: 'SPECTRAL' })
+      await air.locator('[role="slider"]').first().focus()
+      await page.keyboard.press('ArrowUp'); await page.waitForTimeout(400)
+      knob = await status()
+      await openOp('Effect Chain')
+      await chainWin.getByRole('button', { name: 'Clear' }).dispatchEvent('click'); await page.waitForTimeout(300)
+      await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+    } catch (err) {
+      errors.push(`threw: ${err.message.split('\n')[0]}`)
+    }
+    const fresh = errors.slice(before)
+    const ok = /after AirBoost/.test(heard) && /changed/.test(stale) && /after AirBoost/.test(back)
+      && /changed/.test(knob) && fresh.length === 0
+    if (!ok) failures++
+    const why = [
+      /after AirBoost/.test(heard) ? '' : `did not learn through the slot ahead ("${heard}"); `,
+      /changed/.test(stale) ? '' : `bypassing the slot ahead did not mark the profile out of date ("${stale}"); `,
+      /after AirBoost/.test(back) ? '' : `turning it back on did not clear that ("${back}"); `,
+      /changed/.test(knob) ? '' : `a knob ahead did not mark it out of date ("${knob}"); `,
+    ].join('')
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  ${'Denoise in chain'.padEnd(16)} ${why}${fresh.join(' | ')}`)
+  }
+
+  /**
    * Each file keeps its own Plugin Chain (perFilePluginSettings.js; owner,
    * November 2026). A second file opened with nothing saved INHERITS the rack;
    * rebuilt there, it must not change the first file's, and each comes back on

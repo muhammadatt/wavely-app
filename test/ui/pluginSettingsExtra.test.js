@@ -55,11 +55,12 @@ const FIXTURES = {
     lowCrossover: 300, midCrossover: 4000, lowDriveMult: 1.5, midDriveMult: 2, highDriveMult: 4,
   },
   'voicerx': {},
+  'spectral-denoise': { reduction: 20, threshold: 6, smoothing: 30 },
 }
 
 const roundTrip = v => JSON.parse(JSON.stringify(v))
 
-test('the six plugins are keyed by their registry ids', () => {
+test('the plugins without presets are keyed by their registry ids', () => {
   assert.deepEqual(Object.keys(EXTRA_PLUGIN_SETTINGS).sort(), Object.keys(FIXTURES).sort())
   // The registry imports .vue components, so it is read as source: each id is
   // an operation entry marked chainable before the next entry starts.
